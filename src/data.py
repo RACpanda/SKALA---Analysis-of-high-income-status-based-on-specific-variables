@@ -1,4 +1,4 @@
-"""Adult Income 데이터 로딩, 정제 및 Pandas/Polars 성능 비교."""
+"""Adult Census Income 데이터 로딩과 공통 정제."""
 
 from __future__ import annotations
 from pathlib import Path

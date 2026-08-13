@@ -1378,20 +1378,6 @@ def _load_model_bundle() -> dict:
         "global_feature_importance",
     }
 
-    def get_global_feature_importance(
-    ) -> pd.DataFrame:
-        """현재 배포 모델의 전체 테스트셋 permutation importance를 반환한다."""
-
-        bundle = (
-            _load_model_bundle()
-        )
-
-        return pd.DataFrame(
-            bundle[
-                "global_feature_importance"
-            ]
-        )
-
     missing_keys = (
         required_keys
         - set(bundle)
@@ -1404,6 +1390,21 @@ def _load_model_bundle() -> dict:
         )
 
     return bundle
+
+
+def get_global_feature_importance(
+) -> pd.DataFrame:
+    """현재 배포 모델의 전체 테스트셋 permutation importance를 반환한다."""
+
+    bundle = (
+        _load_model_bundle()
+    )
+
+    return pd.DataFrame(
+        bundle[
+            "global_feature_importance"
+        ]
+    )
 
 
 def get_prediction_input_schema() -> dict:

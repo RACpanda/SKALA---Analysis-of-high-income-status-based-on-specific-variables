@@ -1075,3 +1075,81 @@ def plot_what_if_simulation(
     )
 
     return figure
+
+def plot_global_feature_importance(
+    feature_importance: pd.DataFrame,
+    *,
+    top_n: int = 10,
+) -> go.Figure:
+    """전체 테스트셋 기준 permutation importance를 시각화한다."""
+
+    _require_columns(
+        feature_importance,
+        [
+            "feature",
+            "importance_mean",
+            "importance_std",
+        ],
+        "전체 모델 Feature Importance",
+    )
+
+    if feature_importance.empty:
+        raise VisualizationError(
+            "Feature Importance 결과가 비어 있습니다."
+        )
+
+    if top_n < 1:
+        raise VisualizationError(
+            "top_n은 1 이상이어야 합니다."
+        )
+
+    chart_data = (
+        feature_importance
+        .sort_values(
+            "importance_mean",
+            ascending=False,
+        )
+        .head(top_n)
+        .sort_values(
+            "importance_mean",
+            ascending=True,
+        )
+        .copy()
+    )
+
+    figure = go.Figure()
+
+    figure.add_trace(
+        go.Bar(
+            x=chart_data[
+                "importance_mean"
+            ],
+            y=chart_data[
+                "feature"
+            ],
+            orientation="h",
+            error_x={
+                "type": "data",
+                "array": chart_data[
+                    "importance_std"
+                ],
+                "visible": True,
+            },
+            hovertemplate=(
+                "%{y}"
+                "<br>Permutation Importance: %{x:.4f}"
+                "<extra></extra>"
+            ),
+        )
+    )
+
+    figure.update_layout(
+        title="전체 모델 기준 예측 변수 중요도",
+        xaxis_title=(
+            "ROC-AUC Permutation Importance"
+        ),
+        yaxis_title="",
+        showlegend=False,
+    )
+
+    return figure

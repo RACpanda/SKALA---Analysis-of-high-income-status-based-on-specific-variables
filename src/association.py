@@ -792,6 +792,45 @@ def _build_design_matrix(
 # 조정 후 Logistic Regression
 # ============================================================
 
+_MAX_EXP_LOG = float(
+    np.log(
+        np.finfo(float).max
+    )
+)
+
+_MIN_EXP_LOG = float(
+    np.log(
+        np.finfo(float).tiny
+    )
+)
+
+
+def _safe_exp(
+    value: float,
+) -> float | None:
+    """log-scale 값을 overflow/underflow 없이 지수변환한다."""
+
+    value = float(
+        value
+    )
+
+    if not np.isfinite(
+        value
+    ):
+        return None
+
+    if (
+        value > _MAX_EXP_LOG
+        or value < _MIN_EXP_LOG
+    ):
+        return None
+
+    return float(
+        np.exp(
+            value
+        )
+    )
+
 def _fit_logistic_association(
     df: pd.DataFrame,
     request: AnalysisRequest,
@@ -913,48 +952,124 @@ def _fit_logistic_association(
             ]
         )
 
-        if not np.isfinite(
-            [
-                coefficient,
-                ci_low_log,
-                ci_high_log,
-            ]
-        ).all():
-            raise AssociationError(
-                "관심 변수의 회귀계수 또는 신뢰구간이 "
-                "유한한 값으로 추정되지 않았습니다. "
-                "희소한 범주나 과도한 분리를 확인하세요."
+        exposure_results: list[dict] = []
+        estimation_warnings: list[str] = []
+
+        for term in exposure_terms:
+            coefficient = float(
+                fitted.params[
+                    term
+                ]
             )
 
-        odds_ratio = float(
-            np.exp(
-                coefficient
+            ci_low_log = float(
+                confidence_interval.loc[
+                    term,
+                    0,
+                ]
             )
-        )
 
-        ci_low = float(
-            np.exp(
-                ci_low_log
+            ci_high_log = float(
+                confidence_interval.loc[
+                    term,
+                    1,
+                ]
             )
-        )
 
-        ci_high = float(
-            np.exp(
-                ci_high_log
+            p_value = float(
+                fitted.pvalues[
+                    term
+                ]
             )
-        )
 
-        if not np.isfinite(
-            [
-                odds_ratio,
-                ci_low,
-                ci_high,
-            ]
-        ).all():
-            raise AssociationError(
-                "Odds Ratio가 지나치게 커 안정적으로 "
-                "표현할 수 없습니다. "
-                "희소한 범주나 완전분리를 확인하세요."
+            odds_ratio = (
+                _safe_exp(
+                    coefficient
+                )
+            )
+
+            ci_low = (
+                _safe_exp(
+                    ci_low_log
+                )
+            )
+
+            ci_high = (
+                _safe_exp(
+                    ci_high_log
+                )
+            )
+
+            estimable = (
+                odds_ratio is not None
+                and ci_low is not None
+                and ci_high is not None
+                and np.isfinite(
+                    p_value
+                )
+            )
+
+            if not estimable:
+                warning_message = (
+                    f"'{term}' 범주는 완전분리 또는 준완전분리의 "
+                    "영향으로 Odds Ratio와 신뢰구간을 "
+                    "안정적으로 추정하지 못했습니다."
+                )
+
+                estimation_warnings.append(
+                    warning_message
+                )
+
+                exposure_results.append(
+                    {
+                        "term": term,
+                        "coefficient": (
+                            coefficient
+                            if np.isfinite(
+                                coefficient
+                            )
+                            else None
+                        ),
+                        "odds_ratio": None,
+                        "p_value": (
+                            p_value
+                            if np.isfinite(
+                                p_value
+                            )
+                            else None
+                        ),
+                        "ci_95_low": None,
+                        "ci_95_high": None,
+                        "estimable": False,
+                        "warning": (
+                            warning_message
+                        ),
+                    }
+                )
+
+                continue
+
+            exposure_results.append(
+                {
+                    "term": term,
+                    "coefficient": (
+                        coefficient
+                    ),
+                    "odds_ratio": (
+                        odds_ratio
+                    ),
+                    "p_value": (
+                        p_value
+                    ),
+                    "ci_95_low": (
+                        ci_low
+                    ),
+                    "ci_95_high": (
+                        ci_high
+                    ),
+                    "estimable": True,
+                    "warning": None,
+                }
             )
 
         exposure_results.append(
@@ -995,6 +1110,9 @@ def _fit_logistic_association(
         ),
         "exposure_effects": (
             exposure_results
+        ),
+        "estimation_warnings": (
+            estimation_warnings
         ),
         "model_diagnostics": {
             "converged": (

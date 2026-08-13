@@ -456,6 +456,28 @@ def plot_adjusted_association(
     rows: list[dict] = []
 
     for effect in exposure_effects:
+        if not effect.get(
+            "estimable",
+            True,
+        ):
+            continue
+
+        if (
+            effect.get(
+                "odds_ratio"
+            )
+            is None
+            or effect.get(
+                "ci_95_low"
+            )
+            is None
+            or effect.get(
+                "ci_95_high"
+            )
+            is None
+        ):
+            continue
+        
         odds_ratio = float(
             effect[
                 "odds_ratio"
@@ -515,6 +537,12 @@ def plot_adjusted_association(
                     ]
                 ),
             }
+        )
+
+    if not rows:
+        raise VisualizationError(
+            "관심 변수의 Odds Ratio를 안정적으로 "
+            "추정할 수 있는 범주가 없습니다."
         )
 
     chart_data = (

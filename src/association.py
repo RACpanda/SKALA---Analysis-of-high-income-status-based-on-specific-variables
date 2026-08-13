@@ -1,25 +1,27 @@
-"""
-Adult Census Income 범용 연관성 분석 모듈.
+"""Adult Census Income 범용 연관성 분석.
 
-Purpose:
-    사용자가 선택한 관심 변수(exposure)와 통제 변수(controls)를 바탕으로
-    고소득 여부(target)와의 조정 전·후 연관성을 분석한다.
+사용자가 선택한 관심 변수 1개와 통제 변수 0개 이상을 이용해
+고소득 여부와의 조정 전·후 연관성을 분석한다.
 
-Main Tasks:
-    1. 관심 변수를 binary / continuous / categorical로 자동 판별한다.
-    2. 해당 분석에 필요한 변수만 선택해 결측치를 처리한다.
-    3. 변수 유형에 맞는 조정 전 요약 통계를 계산한다.
-    4. 이진 결과변수에 대해 Logistic Regression을 수행한다.
-    5. coefficient, odds ratio, p-value, 95% CI를 반환한다.
+주요 역할:
+    1. 분석 요청 검증
+    2. 분석에 필요한 표본 구성
+    3. 관심 변수 유형에 맞는 조정 전 분석
+    4. 통제변수를 포함한 Logistic Regression
+    5. 선택적으로 이진 관심 변수에 대한 PSM 수행
+    6. 웹에서 사용할 하나의 결과 객체 반환
 
-Caution:
-    이 모듈에서 계산하는 결과는 관찰 데이터에 기반한 연관성이다.
-    통제변수를 포함하더라도 측정되지 않은 교란요인이 존재할 수 있으므로
-    결과를 확정적인 인과효과로 해석하지 않는다.
+결과변수는 서비스 목적에 따라 high_income으로 고정한다.
 
-    modeling.py의 머신러닝 모델과 목적이 다르다.
+주의:
+    Logistic Regression이나 PSM에서 통제변수를 사용하더라도
+    관측되지 않은 교란요인은 통제할 수 없다.
+    따라서 결과는 조건부 연관성으로 해석하며
+    확정적인 인과효과를 의미하지 않는다.
+
+    modeling.py와 목적이 다르다.
     - association.py: 변수와 고소득 여부의 관계 설명
-    - modeling.py: 새로운 입력의 고소득 여부 예측
+    - modeling.py: 새로운 입력 조건의 고소득 여부 예측
 """
 
 from __future__ import annotations
@@ -30,15 +32,26 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
-from scipy.stats import chi2_contingency, pointbiserialr
-from statsmodels.tools.sm_exceptions import PerfectSeparationError
+from scipy.stats import (
+    chi2_contingency,
+    pointbiserialr,
+)
+from statsmodels.tools.sm_exceptions import (
+    PerfectSeparationError,
+)
 
+from src.config import (
+    ANALYSIS_VARIABLE_TYPES,
+    ANALYSIS_VARIABLES,
+    TARGET_COLUMN,
+)
 from src.data import prepare_analysis_data
+from src.statistics import (
+    StatisticsError,
+    binary_group_association,
+    propensity_score_matching,
+)
 
-
-# ============================================================
-# 분석 타입 정의
-# ============================================================
 
 VariableType = Literal[
     "binary",
@@ -48,75 +61,103 @@ VariableType = Literal[
 
 
 class AssociationError(ValueError):
-    """연관성 분석 입력 또는 모델 적합 과정에서 발생하는 오류."""
+    """연관성 분석 요청 또는 모델 적합 과정에서 발생하는 오류."""
 
 
 @dataclass(frozen=True)
 class AnalysisRequest:
-    """사용자가 요청한 연관성 분석 조건.
+    """사용자가 요청한 고소득 연관성 분석 조건.
 
     Args:
         exposure:
-            고소득 여부와의 관계를 확인할 관심 변수.
-
-        target:
-            분석할 결과변수.
-            현재 프로젝트에서는 기본적으로 high_income을 사용한다.
+            고소득 여부와의 관계를 직접 확인할 관심 변수.
 
         controls:
-            exposure와 target의 관계를 볼 때 함께 조정할 통제 변수.
+            관심 변수와 고소득 여부의 관계를 분석할 때
+            통계적으로 함께 조정할 변수.
+
+        include_psm:
+            True이면 조건이 충족되는 경우 PSM을 추가 수행한다.
+            현재 PSM은 이진 관심 변수와 하나 이상의 통제변수가
+            있는 경우에만 지원한다.
     """
 
     exposure: str
-    target: str = "high_income"
     controls: tuple[str, ...] = ()
+    include_psm: bool = False
 
 
 # ============================================================
-# 공통 입력 검증
+# 요청 검증
 # ============================================================
 
 def _validate_request(
     df: pd.DataFrame,
     request: AnalysisRequest,
 ) -> None:
-    """분석 요청 자체가 논리적으로 유효한지 확인한다."""
+    """서비스에서 허용하는 연관성 분석 요청인지 확인한다."""
 
-    if not isinstance(df, pd.DataFrame):
+    if not isinstance(
+        df,
+        pd.DataFrame,
+    ):
         raise AssociationError(
-            "연관성 분석 입력은 pandas.DataFrame이어야 합니다."
+            "연관성 분석 입력은 "
+            "pandas.DataFrame이어야 합니다."
         )
 
     if df.empty:
         raise AssociationError(
-            "연관성 분석용 데이터프레임이 비어 있습니다."
+            "연관성 분석 데이터가 비어 있습니다."
         )
 
-    if request.exposure == request.target:
+    if (
+        request.exposure
+        not in ANALYSIS_VARIABLES
+    ):
         raise AssociationError(
-            "관심 변수(exposure)와 결과 변수(target)는 "
-            "같은 변수일 수 없습니다."
+            "관심 변수로 사용할 수 없는 변수입니다: "
+            f"{request.exposure}"
         )
 
-    if request.exposure in request.controls:
+    invalid_controls = [
+        control
+        for control in request.controls
+        if control
+        not in ANALYSIS_VARIABLES
+    ]
+
+    if invalid_controls:
         raise AssociationError(
-            f"관심 변수 '{request.exposure}'가 "
-            "통제 변수에도 포함되어 있습니다."
+            "통제 변수로 사용할 수 없는 변수가 있습니다: "
+            f"{invalid_controls}"
         )
 
-    if request.target in request.controls:
+    if (
+        request.exposure
+        in request.controls
+    ):
         raise AssociationError(
-            f"결과 변수 '{request.target}'는 "
-            "통제 변수로 사용할 수 없습니다."
+            f"관심 변수 '{request.exposure}'를 "
+            "통제 변수에 동시에 포함할 수 없습니다."
         )
 
-    if len(set(request.controls)) != len(request.controls):
+    if (
+        len(
+            set(
+                request.controls
+            )
+        )
+        != len(
+            request.controls
+        )
+    ):
         raise AssociationError(
             "통제 변수에 중복된 변수가 있습니다."
         )
 
     required_columns = [
-        request.target,
+        TARGET_COLUMN,
         request.exposure,
         *request.controls,
     ]
@@ -129,52 +170,29 @@ def _validate_request(
 
     if missing_columns:
         raise AssociationError(
-            "분석에 필요한 변수가 없습니다: "
+            "연관성 분석에 필요한 변수가 없습니다: "
             f"{missing_columns}"
         )
 
-
-# ============================================================
-# 변수 유형 판별
-# ============================================================
-
-def infer_variable_type(
-    series: pd.Series,
-) -> VariableType:
-    """관심 변수를 binary / continuous / categorical로 분류한다.
-
-    판별 기준:
-        - 고유값 2개: binary
-        - 고유값이 3개 이상이고 숫자형: continuous
-        - 그 외: categorical
-
-    Notes:
-        숫자로 코딩된 범주형 변수는 향후 config.py의 변수 메타데이터를
-        이용해 명시적으로 구분하는 방식으로 발전시키는 것이 더 안전하다.
-    """
-
-    non_null = series.dropna()
-
-    if non_null.empty:
-        raise AssociationError(
-            f"변수 '{series.name}'에 분석 가능한 값이 없습니다."
+    if request.include_psm:
+        exposure_type = (
+            ANALYSIS_VARIABLE_TYPES[
+                request.exposure
+            ]
         )
 
-    unique_count = non_null.nunique()
+        if exposure_type != "binary":
+            raise AssociationError(
+                "현재 PSM은 이진 관심 변수에만 사용할 수 있습니다. "
+                f"'{request.exposure}'의 유형은 "
+                f"'{exposure_type}'입니다."
+            )
 
-    if unique_count < 2:
-        raise AssociationError(
-            f"변수 '{series.name}'에 서로 다른 값이 "
-            "2개 이상 필요합니다."
-        )
-
-    if unique_count == 2:
-        return "binary"
-
-    if pd.api.types.is_numeric_dtype(non_null):
-        return "continuous"
-
-    return "categorical"
+        if not request.controls:
+            raise AssociationError(
+                "PSM을 사용하려면 최소 1개의 "
+                "통제 변수가 필요합니다."
+            )
 
 
 # ============================================================
@@ -184,47 +202,76 @@ def infer_variable_type(
 def _validate_binary_target(
     series: pd.Series,
 ) -> None:
-    """현재 Logistic Regression용 target이 정확히 0/1인지 검증한다.
+    """high_income이 정확히 0과 1을 모두 포함하는지 확인한다."""
 
-    잘못된 값을 int로 변환한 뒤 검사하지 않고,
-    원래 값을 그대로 확인해 데이터 오류가 숨겨지는 것을 막는다.
-    """
+    try:
+        numeric = pd.to_numeric(
+            series.dropna(),
+            errors="raise",
+        )
+    except (
+        TypeError,
+        ValueError,
+    ) as exc:
+        raise AssociationError(
+            f"결과 변수 '{TARGET_COLUMN}'을 "
+            "0/1 숫자로 해석할 수 없습니다."
+        ) from exc
 
     values = set(
-        series.dropna().unique()
+        numeric.unique()
     )
 
-    if values != {0, 1}:
+    if values != {
+        0,
+        1,
+    }:
         raise AssociationError(
-            f"결과 변수 '{series.name}'는 "
-            "0과 1을 모두 포함하는 이진 변수여야 합니다. "
+            f"결과 변수 '{TARGET_COLUMN}'은 "
+            "0과 1을 모두 포함해야 합니다. "
             f"현재 값: {values}"
         )
 
 
 # ============================================================
-# 범주 순서 결정
+# 범주 처리
 # ============================================================
 
 def _ordered_levels(
     series: pd.Series,
 ) -> list:
-    """범주형 변수의 기준 범주를 재현 가능하게 결정한다.
+    """관측된 범주를 재현 가능한 순서로 정렬한다."""
 
-    값의 문자열 표현을 기준으로 정렬하며,
-    첫 번째 값을 Logistic Regression의 기준 범주로 사용한다.
-    """
-
-    values = (
+    return sorted(
         series
         .dropna()
         .unique()
-        .tolist()
+        .tolist(),
+        key=lambda value: str(
+            value
+        ),
     )
 
-    return sorted(
-        values,
-        key=lambda value: str(value),
+
+def _binary_levels(
+    series: pd.Series,
+) -> tuple:
+    """이진 변수의 기준 범주와 비교 범주를 반환한다."""
+
+    levels = _ordered_levels(
+        series
+    )
+
+    if len(levels) != 2:
+        raise AssociationError(
+            f"이진 변수 '{series.name}'에는 "
+            "정확히 두 범주가 필요합니다. "
+            f"현재 범주 수: {len(levels)}"
+        )
+
+    return (
+        levels[0],
+        levels[1],
     )
 
 
@@ -237,72 +284,52 @@ def _unadjusted_summary(
     request: AnalysisRequest,
     exposure_type: VariableType,
 ) -> dict:
-    """통제변수를 적용하기 전 exposure와 target의 관계를 요약한다."""
+    """통제변수를 적용하기 전 관심 변수와 고소득 여부의 관계를 계산한다."""
 
-    exposure = request.exposure
-    target = request.target
+    exposure = (
+        request.exposure
+    )
 
-    # --------------------------------------------------------
-    # 이진형 관심 변수
-    # --------------------------------------------------------
-
+    # 이진 관심 변수의 집단 비교는 statistics.py의
+    # 공통 통계 함수를 사용해 계산 중복을 방지한다.
     if exposure_type == "binary":
-
-        levels = _ordered_levels(
-            df[exposure]
-        )
-
-        reference = levels[0]
-        comparison = levels[1]
-
-        grouped = (
-            df
-            .groupby(
-                exposure,
-                observed=True,
-            )[target]
-            .agg(
-                n="size",
-                target_rate="mean",
+        try:
+            result = (
+                binary_group_association(
+                    df,
+                    exposure=exposure,
+                    outcome=TARGET_COLUMN,
+                )
             )
-            .reset_index()
-        )
+        except StatisticsError as exc:
+            raise AssociationError(
+                str(exc)
+            ) from exc
 
-        rates = {
-            row[exposure]: float(
-                row["target_rate"]
-            )
-            for _, row in grouped.iterrows()
-        }
-
-        return {
-            "method": "binary_group_comparison",
-            "reference_level": reference,
-            "comparison_level": comparison,
-            "reference_rate": rates[reference],
-            "comparison_rate": rates[comparison],
-            "rate_difference": (
-                rates[comparison]
-                - rates[reference]
-            ),
-            "groups": grouped.to_dict(
-                orient="records"
-            ),
-        }
+        return result[
+            "analysis"
+        ]
 
     # --------------------------------------------------------
     # 연속형 관심 변수
     # --------------------------------------------------------
-
     if exposure_type == "continuous":
+        exposure_values = (
+            pd.to_numeric(
+                df[exposure],
+                errors="raise",
+            )
+            .astype(float)
+        )
 
-        exposure_values = pd.to_numeric(
-            df[exposure],
-            errors="raise",
-        ).astype(float)
+        if exposure_values.nunique() < 2:
+            raise AssociationError(
+                f"관심 변수 '{exposure}'에 "
+                "서로 다른 값이 2개 이상 필요합니다."
+            )
 
         target_values = (
-            df[target]
+            df[TARGET_COLUMN]
             .astype(int)
         )
 
@@ -313,15 +340,84 @@ def _unadjusted_summary(
             )
         )
 
+        # 그래프도 동일한 분석 표본을 사용하도록
+        # 연속형 관심 변수의 구간별 실제 고소득률을 함께 계산한다.
+        bin_count = min(
+            10,
+            int(
+                exposure_values.nunique()
+            ),
+        )
+
+        binned = pd.DataFrame(
+            {
+                exposure: exposure_values,
+                TARGET_COLUMN: target_values,
+            }
+        )
+
+        binned["__bin__"] = pd.qcut(
+            binned[exposure],
+            q=bin_count,
+            duplicates="drop",
+        )
+
+        bins = (
+            binned
+            .groupby(
+                "__bin__",
+                observed=True,
+            )
+            .agg(
+                exposure_mean=(
+                    exposure,
+                    "mean",
+                ),
+                exposure_min=(
+                    exposure,
+                    "min",
+                ),
+                exposure_max=(
+                    exposure,
+                    "max",
+                ),
+                n=(
+                    TARGET_COLUMN,
+                    "size",
+                ),
+                target_rate=(
+                    TARGET_COLUMN,
+                    "mean",
+                ),
+            )
+            .reset_index(drop=True)
+            .sort_values(
+                "exposure_mean"
+            )
+        )
+
         return {
-            "method": "point_biserial_correlation",
-            "correlation": float(correlation),
-            "p_value": float(p_value),
+            "method": (
+                "point_biserial_correlation"
+            ),
+            "correlation": float(
+                correlation
+            ),
+            "p_value": float(
+                p_value
+            ),
             "exposure_mean": float(
                 exposure_values.mean()
             ),
             "exposure_std": float(
-                exposure_values.std(ddof=1)
+                exposure_values.std(
+                    ddof=1
+                )
+            ),
+            "bins": (
+                bins.to_dict(
+                    orient="records"
+                )
             ),
         }
 
@@ -334,7 +430,7 @@ def _unadjusted_summary(
         .groupby(
             exposure,
             observed=True,
-        )[target]
+        )[TARGET_COLUMN]
         .agg(
             n="size",
             target_rate="mean",
@@ -343,33 +439,66 @@ def _unadjusted_summary(
         .sort_values(
             "target_rate",
             ascending=False,
+            ignore_index=True,
         )
     )
+
+    if len(grouped) < 2:
+        raise AssociationError(
+            f"관심 변수 '{exposure}'에 "
+            "서로 다른 범주가 2개 이상 필요합니다."
+        )
 
     contingency = pd.crosstab(
         df[exposure],
-        df[target],
+        df[TARGET_COLUMN],
     )
 
-    chi2, p_value, dof, _ = (
-        chi2_contingency(
-            contingency
-        )
+    (
+        chi2,
+        p_value,
+        degrees_of_freedom,
+        expected,
+    ) = chi2_contingency(
+        contingency
+    )
+
+    expected = np.asarray(
+        expected,
+        dtype=float,
     )
 
     return {
-        "method": "categorical_group_comparison",
-        "chi2_statistic": float(chi2),
-        "chi2_p_value": float(p_value),
-        "degrees_of_freedom": int(dof),
-        "groups": grouped.to_dict(
-            orient="records"
+        "method": (
+            "categorical_group_comparison"
+        ),
+        "chi2_statistic": float(
+            chi2
+        ),
+        "chi2_p_value": float(
+            p_value
+        ),
+        "degrees_of_freedom": int(
+            degrees_of_freedom
+        ),
+        "minimum_expected_count": float(
+            expected.min()
+        ),
+        "expected_cells_under_5": int(
+            (
+                expected < 5
+            ).sum()
+        ),
+        "groups": (
+            grouped.to_dict(
+                orient="records"
+            )
         ),
     }
 
 
 # ============================================================
-# Logistic Regression 입력 행렬 생성
+# Logistic Regression 입력 행렬
 # ============================================================
 
 def _build_design_matrix(
@@ -381,24 +510,41 @@ def _build_design_matrix(
     list[str],
     dict,
 ]:
-    """exposure와 controls를 Logistic Regression 입력 X로 변환한다.
+    """관심 변수와 통제 변수를 Logistic Regression 입력으로 변환한다.
+
+    변수 유형은 DataFrame dtype을 추측하지 않고
+    config.py의 ANALYSIS_VARIABLE_TYPES를 기준으로 처리한다.
 
     처리 원칙:
-        - continuous: 숫자 그대로 사용
-        - binary: 기준 범주를 0, 비교 범주를 1로 변환
-        - categorical: one-hot encoding 후 첫 범주를 기준 범주로 제거
-        - 범주형 controls도 동일하게 one-hot encoding
+        continuous:
+            숫자값 그대로 사용한다.
+
+        binary:
+            기준 범주를 0, 비교 범주를 1로 변환한다.
+
+        categorical:
+            첫 범주를 기준으로 두고 one-hot encoding한다.
     """
 
-    exposure = request.exposure
-    controls = list(request.controls)
+    exposure = (
+        request.exposure
+    )
+
+    controls = list(
+        request.controls
+    )
 
     predictors = [
         exposure,
         *controls,
     ]
 
-    X = df[predictors].copy()
+    X = (
+        df[
+            predictors
+        ]
+        .copy()
+    )
 
     categorical_columns: list[str] = []
 
@@ -407,17 +553,16 @@ def _build_design_matrix(
     }
 
     # --------------------------------------------------------
-    # 관심 변수 처리
+    # 관심 변수
     # --------------------------------------------------------
 
     if exposure_type == "binary":
-
-        levels = _ordered_levels(
+        (
+            reference,
+            comparison,
+        ) = _binary_levels(
             X[exposure]
         )
-
-        reference = levels[0]
-        comparison = levels[1]
 
         X[exposure] = (
             X[exposure]
@@ -432,76 +577,141 @@ def _build_design_matrix(
 
         exposure_metadata.update(
             {
-                "reference_level": reference,
-                "comparison_level": comparison,
+                "reference_level": (
+                    reference
+                ),
+                "comparison_level": (
+                    comparison
+                ),
             }
         )
 
     elif exposure_type == "continuous":
+        X[exposure] = (
+            pd.to_numeric(
+                X[exposure],
+                errors="raise",
+            )
+            .astype(float)
+        )
 
-        X[exposure] = pd.to_numeric(
-            X[exposure],
-            errors="raise",
-        ).astype(float)
+        if (
+            X[exposure].nunique()
+            < 2
+        ):
+            raise AssociationError(
+                f"관심 변수 '{exposure}'에 "
+                "서로 다른 값이 2개 이상 필요합니다."
+            )
 
         exposure_metadata[
             "interpretation_unit"
         ] = 1
 
     else:
-
         levels = _ordered_levels(
             X[exposure]
         )
 
-        X[exposure] = pd.Categorical(
-            X[exposure],
-            categories=levels,
+        if len(levels) < 2:
+            raise AssociationError(
+                f"관심 변수 '{exposure}'에 "
+                "서로 다른 범주가 2개 이상 필요합니다."
+            )
+
+        X[exposure] = (
+            pd.Categorical(
+                X[exposure],
+                categories=levels,
+            )
         )
 
         categorical_columns.append(
             exposure
         )
 
-        exposure_metadata[
-            "reference_level"
-        ] = levels[0]
-
-        exposure_metadata[
-            "levels"
-        ] = levels
+        exposure_metadata.update(
+            {
+                "reference_level": (
+                    levels[0]
+                ),
+                "levels": (
+                    levels
+                ),
+            }
+        )
 
     # --------------------------------------------------------
-    # 통제 변수 처리
+    # 통제 변수
     # --------------------------------------------------------
 
     for column in controls:
+        variable_type = (
+            ANALYSIS_VARIABLE_TYPES[
+                column
+            ]
+        )
 
-        if pd.api.types.is_numeric_dtype(
-            X[column]
-        ):
-            X[column] = pd.to_numeric(
-                X[column],
-                errors="raise",
-            ).astype(float)
+        if variable_type == "continuous":
+            X[column] = (
+                pd.to_numeric(
+                    X[column],
+                    errors="raise",
+                )
+                .astype(float)
+            )
+
+        elif variable_type == "binary":
+            levels = _ordered_levels(
+                X[column]
+            )
+
+            # 이번 분석 표본에서 한 범주만 남은 binary control은
+            # 이후 constant column 제거 단계에서 삭제한다.
+            if len(levels) == 1:
+                X[column] = 0.0
+
+            elif len(levels) == 2:
+                X[column] = (
+                    X[column]
+                    .map(
+                        {
+                            levels[0]: 0.0,
+                            levels[1]: 1.0,
+                        }
+                    )
+                    .astype(float)
+                )
+
+            else:
+                raise AssociationError(
+                    f"binary로 설정된 통제 변수 '{column}'에 "
+                    f"{len(levels)}개의 범주가 있습니다."
+                )
 
         else:
             levels = _ordered_levels(
                 X[column]
             )
 
-            X[column] = pd.Categorical(
-                X[column],
-                categories=levels,
+            if not levels:
+                raise AssociationError(
+                    f"통제 변수 '{column}'에 "
+                    "사용 가능한 값이 없습니다."
+                )
+
+            X[column] = (
+                pd.Categorical(
+                    X[column],
+                    categories=levels,
+                )
             )
 
             categorical_columns.append(
                 column
             )
 
-    # 범주형 변수는 기준 범주 하나를 제외하고 dummy 변수로 변환한다.
     if categorical_columns:
-
         X = pd.get_dummies(
             X,
             columns=categorical_columns,
@@ -510,39 +720,45 @@ def _build_design_matrix(
         )
 
     # --------------------------------------------------------
-    # exposure에 해당하는 회귀계수 이름 확인
+    # 관심 변수 회귀계수 이름
     # --------------------------------------------------------
 
     if exposure_type in {
         "binary",
         "continuous",
     }:
-
         exposure_terms = [
             exposure
         ]
 
     else:
-
-        prefix = f"{exposure}_"
+        prefix = (
+            f"{exposure}_"
+        )
 
         exposure_terms = [
             column
             for column in X.columns
-            if column.startswith(prefix)
+            if column.startswith(
+                prefix
+            )
         ]
 
-    # 값이 하나뿐인 통제변수는 회귀에 아무 정보도 주지 않으므로 제거한다.
+    # 이번 분석 표본에서 값이 하나뿐인 통제변수는
+    # 회귀모형에 정보를 제공하지 않으므로 제거한다.
     constant_columns = [
         column
         for column in X.columns
-        if X[column].nunique(
-            dropna=False
-        ) <= 1
+        if (
+            X[column]
+            .nunique(
+                dropna=False
+            )
+            <= 1
+        )
     ]
 
     if constant_columns:
-
         X = X.drop(
             columns=constant_columns
         )
@@ -555,8 +771,14 @@ def _build_design_matrix(
 
     if not exposure_terms:
         raise AssociationError(
-            f"관심 변수 '{exposure}'의 회귀계수를 "
-            "생성할 수 없습니다."
+            f"관심 변수 '{exposure}'의 "
+            "회귀계수를 생성할 수 없습니다."
+        )
+
+    if X.empty:
+        raise AssociationError(
+            "Logistic Regression에 사용할 "
+            "설명변수가 없습니다."
         )
 
     return (
@@ -575,39 +797,45 @@ def _fit_logistic_association(
     request: AnalysisRequest,
     exposure_type: VariableType,
 ) -> dict:
-    """통제변수를 포함한 이항 Logistic Regression을 수행한다."""
+    """관심 변수와 통제 변수를 포함한 이항 Logistic Regression을 수행한다."""
 
-    X, exposure_terms, exposure_metadata = (
-        _build_design_matrix(
-            df,
-            request,
-            exposure_type,
-        )
+    (
+        X,
+        exposure_terms,
+        exposure_metadata,
+    ) = _build_design_matrix(
+        df,
+        request,
+        exposure_type,
     )
 
     y = (
-        df[request.target]
+        df[
+            TARGET_COLUMN
+        ]
         .astype(int)
     )
 
-    # 절편 추가
     X = sm.add_constant(
         X,
         has_constant="add",
     )
 
-    # 정확한 선형 종속이 있으면 Logit 추정이 불안정하므로
-    # statsmodels 내부 오류가 발생하기 전에 명확한 메시지를 제공한다.
-    matrix_rank = np.linalg.matrix_rank(
-        X.to_numpy(
-            dtype=float
+    matrix_rank = (
+        np.linalg.matrix_rank(
+            X.to_numpy(
+                dtype=float
+            )
         )
     )
 
-    if matrix_rank < X.shape[1]:
+    if (
+        matrix_rank
+        < X.shape[1]
+    ):
         raise AssociationError(
             "설명변수 사이에 완전한 선형 종속성이 있습니다. "
-            "서로 중복되거나 동일 정보를 가진 통제변수를 "
+            "서로 중복되거나 동일한 정보를 가진 통제변수를 "
             "제거한 뒤 다시 분석하세요."
         )
 
@@ -634,9 +862,13 @@ def _fit_logistic_association(
             "중복되거나 지나치게 유사한 통제변수를 확인하세요."
         ) from exc
 
-    except (TypeError, ValueError) as exc:
+    except (
+        TypeError,
+        ValueError,
+    ) as exc:
         raise AssociationError(
-            f"Logistic Regression 적합에 실패했습니다: {exc}"
+            "Logistic Regression 적합에 실패했습니다: "
+            f"{exc}"
         ) from exc
 
     converged = bool(
@@ -658,76 +890,105 @@ def _fit_logistic_association(
         )
     )
 
-    # --------------------------------------------------------
-    # 전체 회귀계수 결과
-    # --------------------------------------------------------
+    exposure_results: list[dict] = []
 
-    result_rows = []
-
-    for term in fitted.params.index:
-
-        if term == "const":
-            continue
-
+    for term in exposure_terms:
         coefficient = float(
-            fitted.params[term]
+            fitted.params[
+                term
+            ]
         )
 
-        ci_low = float(
+        ci_low_log = float(
             confidence_interval.loc[
                 term,
                 0,
             ]
         )
 
-        ci_high = float(
+        ci_high_log = float(
             confidence_interval.loc[
                 term,
                 1,
             ]
         )
 
-        result_rows.append(
+        if not np.isfinite(
+            [
+                coefficient,
+                ci_low_log,
+                ci_high_log,
+            ]
+        ).all():
+            raise AssociationError(
+                "관심 변수의 회귀계수 또는 신뢰구간이 "
+                "유한한 값으로 추정되지 않았습니다. "
+                "희소한 범주나 과도한 분리를 확인하세요."
+            )
+
+        odds_ratio = float(
+            np.exp(
+                coefficient
+            )
+        )
+
+        ci_low = float(
+            np.exp(
+                ci_low_log
+            )
+        )
+
+        ci_high = float(
+            np.exp(
+                ci_high_log
+            )
+        )
+
+        if not np.isfinite(
+            [
+                odds_ratio,
+                ci_low,
+                ci_high,
+            ]
+        ).all():
+            raise AssociationError(
+                "Odds Ratio가 지나치게 커 안정적으로 "
+                "표현할 수 없습니다. "
+                "희소한 범주나 완전분리를 확인하세요."
+            )
+
+        exposure_results.append(
             {
                 "term": term,
-                "role": (
-                    "exposure"
-                    if term in exposure_terms
-                    else "control"
+                "coefficient": (
+                    coefficient
                 ),
-                "coefficient": coefficient,
-                "odds_ratio": float(
-                    np.exp(coefficient)
+                "odds_ratio": (
+                    odds_ratio
                 ),
                 "p_value": float(
-                    fitted.pvalues[term]
+                    fitted.pvalues[
+                        term
+                    ]
                 ),
-                "ci_95_low": float(
-                    np.exp(ci_low)
+                "ci_95_low": (
+                    ci_low
                 ),
-                "ci_95_high": float(
-                    np.exp(ci_high)
+                "ci_95_high": (
+                    ci_high
                 ),
             }
         )
 
-    exposure_results = [
-        row
-        for row in result_rows
-        if row["role"] == "exposure"
-    ]
-
     return {
-        "method": "binary_logistic_regression",
-        "converged": converged,
-        "pseudo_r_squared": float(
-            fitted.prsquared
+        "method": (
+            "binary_logistic_regression"
         ),
-        "aic": float(
-            fitted.aic
+        "adjustment_applied": bool(
+            request.controls
         ),
-        "bic": float(
-            fitted.bic
+        "controls": list(
+            request.controls
         ),
         "exposure_metadata": (
             exposure_metadata
@@ -735,32 +996,141 @@ def _fit_logistic_association(
         "exposure_effects": (
             exposure_results
         ),
-        "all_terms": result_rows,
+        "model_diagnostics": {
+            "converged": (
+                converged
+            ),
+            "n_observations": int(
+                fitted.nobs
+            ),
+            "pseudo_r_squared": float(
+                fitted.prsquared
+            ),
+            "aic": float(
+                fitted.aic
+            ),
+            "bic": float(
+                fitted.bic
+            ),
+        },
     }
 
 
 # ============================================================
-# 최종 연관성 분석 진입점
+# PSM 결과 직렬화
+# ============================================================
+
+def _serializable_records(
+    df: pd.DataFrame,
+) -> list[dict]:
+    """DataFrame을 웹/API 응답에 안전한 기본 Python 값으로 변환한다."""
+
+    records: list[dict] = []
+
+    for row in df.to_dict(
+        orient="records"
+    ):
+        converted: dict = {}
+
+        for (
+            key,
+            value,
+        ) in row.items():
+            if isinstance(
+                value,
+                np.generic,
+            ):
+                value = (
+                    value.item()
+                )
+
+            if (
+                isinstance(
+                    value,
+                    float,
+                )
+                and not np.isfinite(
+                    value
+                )
+            ):
+                value = None
+
+            elif pd.isna(
+                value
+            ):
+                value = None
+
+            converted[
+                key
+            ] = value
+
+        records.append(
+            converted
+        )
+
+    return records
+
+
+def _run_optional_psm(
+    df: pd.DataFrame,
+    request: AnalysisRequest,
+) -> dict | None:
+    """요청된 경우 이진 관심 변수의 PSM을 수행한다."""
+
+    if not request.include_psm:
+        return None
+
+    try:
+        (
+            _,
+            balance,
+            result,
+        ) = propensity_score_matching(
+            df,
+            exposure=request.exposure,
+            covariates=list(
+                request.controls
+            ),
+            outcome=TARGET_COLUMN,
+        )
+
+    except StatisticsError as exc:
+        raise AssociationError(
+            f"PSM 수행에 실패했습니다: {exc}"
+        ) from exc
+
+    return {
+        "result": result,
+        "balance": (
+            _serializable_records(
+                balance
+            )
+        ),
+    }
+
+
+# ============================================================
+# 전체 연관성 분석
 # ============================================================
 
 def analyze_association(
     df: pd.DataFrame,
     request: AnalysisRequest,
 ) -> dict:
-    """사용자의 분석 요청을 받아 조정 전·후 연관성 분석을 한 번에 수행한다.
+    """한 번의 사용자 요청에 대한 전체 고소득 연관성 분석을 수행한다.
 
     실행 흐름:
-        1. 입력 요청 검증
-        2. 필요한 열만 선택하고 결측 제거
-        3. target의 0/1 구조 검증
-        4. exposure 유형 자동 판별
-        5. 조정 전 분석
-        6. controls를 포함한 Logistic Regression
-        7. 웹/API에서 사용하기 쉬운 dict로 반환
+        1. 분석 요청 검증
+        2. 이번 분석에 필요한 변수만 선택
+        3. 해당 변수들의 결측 행 제거
+        4. high_income 0/1 구조 검증
+        5. 관심 변수 유형에 맞는 조정 전 분석
+        6. Logistic Regression
+        7. 요청한 경우 PSM
+        8. 요청과 결과를 하나의 객체로 반환
 
-    Returns:
-        분석 요청, 표본 수, 변수 유형,
-        조정 전 결과와 Logistic Regression 결과를 담은 dict.
+    분석별 complete-case 방식을 사용하므로 사용자가 선택한
+    통제 변수에 따라 최종 표본 수가 달라질 수 있다.
     """
 
     _validate_request(
@@ -769,36 +1139,34 @@ def analyze_association(
     )
 
     required_columns = [
-        request.target,
+        TARGET_COLUMN,
         request.exposure,
         *request.controls,
     ]
 
-    # 5번에서 data.py에 추가한 함수.
-    # 전체 데이터가 아니라 이번 분석에서 실제 사용할 변수에 대해서만
-    # 결측 행을 제거한다.
-    analysis_df = prepare_analysis_data(
-        df,
-        required_columns,
+    analysis_df = (
+        prepare_analysis_data(
+            df,
+            required_columns,
+        )
     )
 
     if analysis_df.empty:
         raise AssociationError(
-            "결측값을 제외한 뒤 분석 가능한 표본이 없습니다."
+            "선택한 변수들의 결측값을 제외한 뒤 "
+            "분석 가능한 표본이 없습니다."
         )
 
     _validate_binary_target(
         analysis_df[
-            request.target
+            TARGET_COLUMN
         ]
     )
 
-    exposure_type = (
-        infer_variable_type(
-            analysis_df[
-                request.exposure
-            ]
-        )
+    exposure_type: VariableType = (
+        ANALYSIS_VARIABLE_TYPES[
+            request.exposure
+        ]
     )
 
     unadjusted = (
@@ -817,26 +1185,63 @@ def analyze_association(
         )
     )
 
+    psm = (
+        _run_optional_psm(
+            analysis_df,
+            request,
+        )
+    )
+
     return {
         "request": {
-            "target": request.target,
-            "exposure": request.exposure,
+            "target": (
+                TARGET_COLUMN
+            ),
+            "exposure": (
+                request.exposure
+            ),
             "controls": list(
                 request.controls
+            ),
+            "include_psm": (
+                request.include_psm
             ),
         },
 
         "analysis": {
-            "exposure_type": exposure_type,
-            "sample_size": int(
-                len(analysis_df)
+            "exposure_type": (
+                exposure_type
             ),
-            "unadjusted": unadjusted,
-            "adjusted": adjusted,
+            "input_rows": int(
+                len(df)
+            ),
+            "sample_size": int(
+                len(
+                    analysis_df
+                )
+            ),
+            "rows_excluded_due_to_missing": int(
+                len(df)
+                - len(
+                    analysis_df
+                )
+            ),
+            "unadjusted": (
+                unadjusted
+            ),
+            "adjusted": (
+                adjusted
+            ),
+            "psm": (
+                psm
+            ),
         },
 
         "interpretation_note": (
-            "통제변수를 포함한 결과는 관측된 변수들을 조정한 "
-            "조건부 연관성을 의미하며 확정적인 인과효과를 의미하지 않는다."
+            "조정 전 결과는 관측된 단순 연관성을, "
+            "Logistic Regression 결과는 선택한 통제변수를 "
+            "고려한 조건부 연관성을 의미합니다. "
+            "PSM을 수행한 경우에도 관측된 통제변수만 조정할 수 있으므로 "
+            "어떤 결과도 확정적인 인과효과를 의미하지 않습니다."
         ),
     }

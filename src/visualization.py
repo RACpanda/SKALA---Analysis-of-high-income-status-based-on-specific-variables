@@ -1,336 +1,1077 @@
-"""Seaborn 정적 시각화와 Plotly 인터랙티브 시각화 — 주제 중심(학위·소득·PSM) 차트.
+"""Adult Income 웹 서비스의 사용자용 시각화.
 
-담당: 이서현 (시각화·보고서)
+이 모듈은 분석 결과를 다시 계산하거나 파일에서 읽지 않는다.
 
-예측 모델 진단 차트(성능 지표/ROC curve/confusion matrix)는 model 단계 산출물에 의존하므로
-src/model_visualization.py로 분리했다. main.py에서 model 단계 이후에 호출해야 한다.
+association.py와 modeling.py가 반환한 결과 객체와
+필요한 DataFrame을 받아 Plotly Figure로 변환한다.
+
+주요 역할:
+    1. 관심 변수와 high_income의 조정 전 관계 시각화
+    2. Logistic Regression의 조정된 Odds Ratio 시각화
+    3. PSM 수행 시 매칭 전후 공변량 균형 시각화
+    4. 사용자 입력에 대한 고소득 예측 확률 시각화
+
+모든 함수는 파일을 저장하지 않고 Figure 객체를 반환한다.
+웹 UI는 반환된 Figure를 직접 표시한다.
 """
 
 from __future__ import annotations
 
-import json
-from typing import cast
-
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import seaborn as sns
-from matplotlib.patches import Rectangle
-
-from src.config import FIGURE_DIR, TABLE_DIR
+import plotly.graph_objects as go
 
 
-def _require_columns(df: pd.DataFrame, columns: list[str], chart_name: str) -> None:
-    """차트가 필요로 하는 컬럼이 df에 다 있는지 확인한다.
-
-    없으면 pandas가 던지는 원시 KeyError 대신, 어떤 차트가 어떤 컬럼을 원했는지
-    바로 알 수 있는 메시지로 실패시킨다.
-    """
-    missing = [column for column in columns if column not in df.columns]
-    if missing:
-        raise ValueError(f"{chart_name}에 필요한 컬럼이 없습니다: {missing}")
+class VisualizationError(ValueError):
+    """시각화 입력이나 결과 구조가 올바르지 않을 때 발생하는 오류."""
 
 
 # ============================================================
-# [그룹 비교] 학력별 고소득률 인터랙티브 막대그래프 (Plotly)
-# - x축: education, y축: high_income_rate(%)
-# - hover: 표본 크기(size), education-num
+# 공통 검증
 # ============================================================
-def plot_education_income_rate(df: pd.DataFrame) -> None:
-    _require_columns(
-        df, ["education", "education-num", "high_income"], "plot_education_income_rate"
-    )
-    education_rate = (
-        df.groupby(["education", "education-num"], observed=True)["high_income"]
-        .agg(["mean", "size"])
-        .reset_index()
-        .sort_values("education-num")
-    )
-    # round(2)로 반올림 
-    education_rate["high_income_rate"] = (education_rate["mean"] * 100).round(2)
-    fig = px.bar(
-        education_rate,
-        x="education",
-        y="high_income_rate",
-        hover_data=["size", "education-num"],
-        title="Interactive high-income rate by education",
-        labels={"education": "Education", "high_income_rate": "High-income rate (%)"},
-    )
-    fig.write_html(FIGURE_DIR / "education_income_rate.html", include_plotlyjs="cdn")
 
+def _require_columns(
+    df: pd.DataFrame,
+    columns: list[str],
+    chart_name: str,
+) -> None:
+    """그래프 생성에 필요한 DataFrame 열을 검증한다."""
 
-# ============================================================
-# [분포] age 히스토그램 (Seaborn)
-# - x축: age, hue: income, kde 곡선 포함
-# - 고소득/저소득 집단의 연령 분포 비교
-# - 저소득층은 20대 초중반에 몰려있고, 고소득층은 30~50대에 넓게 분포하는지 확인
-# ============================================================
-def plot_age_distribution(df: pd.DataFrame) -> None:
-    _require_columns(df, ["age", "income"], "plot_age_distribution")
-    plt.figure(figsize=(8, 5))
-    # binwidth를 지정하지 않으면 Seaborn이 자동으로 고른 bin 경계가 정수 나이와
-    # 어긋나서 특정 나이만 유독 튀어 보이는 톱니 패턴이 생긴다. age는 정수이므로
-    # binwidth=1로 고정해 나이 한 살 단위로 정확히 집계한다.
-    # common_norm=False로 두 집단을 각각 독립적으로 정규화한다 — 기본값(True)은 두
-    # 집단을 합쳐서 정규화하기 때문에, 표본 수가 훨씬 많은 <=50K 집단이 표본 크기
-    # 차이만으로 더 높게 그려져 "분포 모양" 비교가 왜곡된다.
-    ax = sns.histplot(
-        data=df,
-        x="age",
-        hue="income",
-        kde=True,
-        element="step",
-        stat="density",
-        common_norm=False,
-        binwidth=1,
-    )
-    ax.set(title="Age distribution by income group", xlabel="Age", ylabel="Density")
-    plt.tight_layout()
-    plt.savefig(FIGURE_DIR / "age_distribution_by_income.png", dpi=160)
-    plt.close()
-
-
-# ============================================================
-# [그룹 비교] 자본 이득 유무(이진 지표) → 고소득률 막대그래프 (Seaborn)
-# - x축: capital-gain 유무(0 vs >0), y축: high_income_rate(%)
-# - capital-gain은 대부분(약 91~92%)이 0이라 금액 자체보다 "있다/없다"가 더 강한 신호
-# - capital-gain=0 집단 vs >0 집단의 고소득률이 약 3배 차이 (정확한 수치는 데이터 정제 로직에 따라 변동)
-# - 결과변수(high_income)와 직접 연결되는 비교라 설계 문서의 핵심 결과변수와 일치
-# ============================================================
-def plot_capital_gain_indicator(df: pd.DataFrame) -> None:
-    _require_columns(df, ["capital-gain", "high_income"], "plot_capital_gain_indicator")
-    capital_gain_indicator = (
-        df.assign(has_capital_gain=(df["capital-gain"] > 0).map({False: "No gain", True: "Has gain"}))
-        .groupby("has_capital_gain", observed=True)["high_income"]
-        .mean()
-        .mul(100)
-        .rename("high_income_rate")
-        .reset_index()
-    )
-    plt.figure(figsize=(7, 5))
-    ax = sns.barplot(
-        data=capital_gain_indicator,
-        x="has_capital_gain",
-        y="high_income_rate",
-        hue="has_capital_gain",
-        legend=False,
-    )
-    ax.set(
-        title="High-income rate by capital gain presence",
-        xlabel="Capital gain",
-        ylabel="High-income rate (%)",
-    )
-    for patch in ax.patches:
-        bar = cast(Rectangle, patch)
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + 1,
-            f"{bar.get_height():.1f}%",
-            ha="center",
+    if not isinstance(
+        df,
+        pd.DataFrame,
+    ):
+        raise VisualizationError(
+            f"{chart_name} 입력은 "
+            "pandas.DataFrame이어야 합니다."
         )
-    ax.margins(y=0.15)
-    
-    plt.tight_layout()
-    plt.savefig(FIGURE_DIR / "capital_gain_indicator_income_rate.png", dpi=160)
-    plt.close()
+
+    missing_columns = [
+        column
+        for column in columns
+        if column not in df.columns
+    ]
+
+    if missing_columns:
+        raise VisualizationError(
+            f"{chart_name}에 필요한 열이 없습니다: "
+            f"{missing_columns}"
+        )
 
 
-# ============================================================
-# [그룹 비교] sex/race별 고소득 비율 막대 (Plotly)
-# - x축: race, y축: high_income_rate, color: sex
-# - 인종/성별 조합별 고소득(>50K) 비율 비교
-# - 집단 간 소득 격차 존재 여부 확인
-# ============================================================
-def plot_race_sex_income_rate(df: pd.DataFrame) -> None:
-    _require_columns(df, ["race", "sex", "high_income"], "plot_race_sex_income_rate")
-    # round(2)로 반올림 
-    sex_race_rate = (
-        df.groupby(["race", "sex"], observed=True)["high_income"]
-        .mean()
-        .mul(100)
-        .round(2)
-        .rename("high_income_rate")
-        .reset_index()
+def _validate_association_result(
+    result: dict,
+) -> None:
+    """association.py 결과의 최소 구조를 확인한다."""
+
+    if not isinstance(
+        result,
+        dict,
+    ):
+        raise VisualizationError(
+            "연관성 분석 결과는 dict여야 합니다."
+        )
+
+    if "request" not in result:
+        raise VisualizationError(
+            "연관성 분석 결과에 request가 없습니다."
+        )
+
+    if "analysis" not in result:
+        raise VisualizationError(
+            "연관성 분석 결과에 analysis가 없습니다."
+        )
+
+    request = result["request"]
+    analysis = result["analysis"]
+
+    required_request_keys = {
+        "target",
+        "exposure",
+        "controls",
+    }
+
+    missing_request_keys = (
+        required_request_keys
+        - set(request)
     )
-    fig = px.bar(
-        sex_race_rate,
-        x="race",
-        y="high_income_rate",
-        color="sex",
-        barmode="group",
-        title="Interactive high-income rate by race and sex",
-        labels={"race": "Race", "high_income_rate": "High-income rate (%)", "sex": "Sex"},
+
+    if missing_request_keys:
+        raise VisualizationError(
+            "연관성 분석 request에 필요한 값이 없습니다: "
+            f"{sorted(missing_request_keys)}"
+        )
+
+    required_analysis_keys = {
+        "exposure_type",
+        "unadjusted",
+        "adjusted",
+    }
+
+    missing_analysis_keys = (
+        required_analysis_keys
+        - set(analysis)
     )
-    fig.write_html(FIGURE_DIR / "race_sex_income_rate.html", include_plotlyjs="cdn")
+
+    if missing_analysis_keys:
+        raise VisualizationError(
+            "연관성 분석 결과에 필요한 값이 없습니다: "
+            f"{sorted(missing_analysis_keys)}"
+        )
 
 
 # ============================================================
-# [그룹 비교] PSM 공변량 균형 Love Plot (Seaborn/Matplotlib)
-# - statistics.py의 propensity_score_matching()이 저장한 psm_balance.csv 사용
-# - x축: SMD(표준화 평균차이), y축: 공변량(매칭 전 SMD 상위 15개, "_nan" 결측 더미 제외)
-# - 매칭 전(빨강) vs 매칭 후(파랑) 점을 나란히 찍어 균형 개선 여부를 확인
-# - 0.1 기준선(점선) 안쪽으로 들어오면 해당 공변량은 "균형이 맞다"고 판단하는 PSM 표준 진단 차트
-# - statistics 단계를 먼저 실행해야 파일이 존재 — 없으면 경고만 출력하고 건너뜀
+# 조정 전 연관성 시각화
 # ============================================================
-def plot_psm_balance() -> None:
-    psm_balance_path = TABLE_DIR / "psm_balance.csv"
-    if not psm_balance_path.exists():
-        print("[시각화 경고] psm_balance.csv가 없습니다. statistics 단계를 먼저 실행하세요.")
-        return
 
-    balance: pd.DataFrame = pd.read_csv(psm_balance_path)
-    non_missing_dummy = ~balance["covariate"].str.endswith("_nan")
-    balance = balance.copy()
+def plot_unadjusted_association(
+    result: dict,
+) -> go.Figure:
+    """association.py가 계산한 동일 표본의 조정 전 결과를 시각화한다."""
 
-    balance["max_smd"] = (
-        balance[
+    _validate_association_result(
+        result
+    )
+
+    request = result["request"]
+    analysis = result["analysis"]
+
+    exposure = request[
+        "exposure"
+    ]
+
+    exposure_type = analysis[
+        "exposure_type"
+    ]
+
+    unadjusted = analysis[
+        "unadjusted"
+    ]
+
+    # --------------------------------------------------------
+    # 이진 관심 변수
+    # --------------------------------------------------------
+
+    if exposure_type == "binary":
+        metadata = unadjusted[
+            "exposure_metadata"
+        ]
+
+        chart_data = pd.DataFrame(
+            {
+                "level": [
+                    metadata[
+                        "reference_level"
+                    ],
+                    metadata[
+                        "comparison_level"
+                    ],
+                ],
+                "sample_size": [
+                    unadjusted[
+                        "reference_n"
+                    ],
+                    unadjusted[
+                        "comparison_n"
+                    ],
+                ],
+                "high_income_rate_percent": [
+                    (
+                        unadjusted[
+                            "reference_rate"
+                        ]
+                        * 100
+                    ),
+                    (
+                        unadjusted[
+                            "comparison_rate"
+                        ]
+                        * 100
+                    ),
+                ],
+            }
+        )
+
+        figure = px.bar(
+            chart_data,
+            x="level",
+            y="high_income_rate_percent",
+            custom_data=[
+                "sample_size",
+            ],
+            title=(
+                f"{exposure}별 조정 전 고소득률"
+            ),
+            labels={
+                "level": exposure,
+                "high_income_rate_percent": (
+                    "고소득률 (%)"
+                ),
+            },
+        )
+
+    # --------------------------------------------------------
+    # 다범주형 관심 변수
+    # --------------------------------------------------------
+
+    elif exposure_type == "categorical":
+        chart_data = pd.DataFrame(
+            unadjusted[
+                "groups"
+            ]
+        )
+
+        chart_data[
+            "high_income_rate_percent"
+        ] = (
+            chart_data[
+                "target_rate"
+            ]
+            * 100
+        )
+
+        chart_data = (
+            chart_data
+            .sort_values(
+                "high_income_rate_percent",
+                ascending=True,
+            )
+        )
+
+        figure = px.bar(
+            chart_data,
+            x=exposure,
+            y="high_income_rate_percent",
+            custom_data=[
+                "n",
+            ],
+            title=(
+                f"{exposure}별 조정 전 고소득률"
+            ),
+            labels={
+                exposure: exposure,
+                "high_income_rate_percent": (
+                    "고소득률 (%)"
+                ),
+            },
+        )
+
+    # --------------------------------------------------------
+    # 연속형 관심 변수
+    # --------------------------------------------------------
+
+    elif exposure_type == "continuous":
+        chart_data = pd.DataFrame(
+            unadjusted[
+                "bins"
+            ]
+        )
+
+        chart_data[
+            "high_income_rate_percent"
+        ] = (
+            chart_data[
+                "target_rate"
+            ]
+            * 100
+        )
+
+        figure = px.line(
+            chart_data,
+            x="exposure_mean",
+            y="high_income_rate_percent",
+            markers=True,
+            custom_data=[
+                "exposure_min",
+                "exposure_max",
+                "n",
+            ],
+            title=(
+                f"{exposure}와 조정 전 고소득률"
+            ),
+            labels={
+                "exposure_mean": (
+                    f"{exposure} 구간 평균"
+                ),
+                "high_income_rate_percent": (
+                    "고소득률 (%)"
+                ),
+            },
+        )
+
+        figure.update_traces(
+            hovertemplate=(
+                f"{exposure} 평균: %{{x:.2f}}"
+                "<br>구간: "
+                "%{customdata[0]:.2f}"
+                " ~ "
+                "%{customdata[1]:.2f}"
+                "<br>고소득률: %{y:.2f}%"
+                "<br>표본 수: %{customdata[2]:,}"
+                "<extra></extra>"
+            )
+        )
+
+        return figure
+
+    else:
+        raise VisualizationError(
+            "지원하지 않는 관심 변수 유형입니다: "
+            f"{exposure_type}"
+        )
+
+    figure.update_traces(
+        hovertemplate=(
+            "%{x}"
+            "<br>고소득률: %{y:.2f}%"
+            "<br>표본 수: %{customdata[0]:,}"
+            "<extra></extra>"
+        )
+    )
+
+    figure.update_yaxes(
+        rangemode="tozero"
+    )
+
+    return figure
+
+
+# ============================================================
+# 조정 후 Odds Ratio 시각화
+# ============================================================
+
+def _exposure_effect_label(
+    term: str,
+    exposure: str,
+    exposure_type: str,
+    metadata: dict,
+) -> str:
+    """회귀계수 이름을 사용자에게 보여줄 라벨로 변환한다."""
+
+    if exposure_type == "continuous":
+        return (
+            f"{exposure} "
+            "(1단위 증가)"
+        )
+
+    if exposure_type == "binary":
+        reference = (
+            metadata.get(
+                "reference_level"
+            )
+        )
+
+        comparison = (
+            metadata.get(
+                "comparison_level"
+            )
+        )
+
+        if (
+            reference is not None
+            and comparison is not None
+        ):
+            return (
+                f"{comparison} vs "
+                f"{reference}"
+            )
+
+        return exposure
+
+    reference = metadata.get(
+        "reference_level"
+    )
+
+    prefix = (
+        f"{exposure}_"
+    )
+
+    level = (
+        term[len(prefix):]
+        if term.startswith(prefix)
+        else term
+    )
+
+    if reference is None:
+        return str(
+            level
+        )
+
+    return (
+        f"{level} vs {reference}"
+    )
+
+
+def plot_adjusted_association(
+    result: dict,
+) -> go.Figure:
+    """관심 변수의 조정된 Odds Ratio와 95% CI를 forest plot으로 표시한다."""
+
+    _validate_association_result(
+        result
+    )
+
+    request = result[
+        "request"
+    ]
+
+    analysis_result = result[
+        "analysis"
+    ]
+
+    adjusted = analysis_result[
+        "adjusted"
+    ]
+
+    exposure = request[
+        "exposure"
+    ]
+
+    exposure_type = (
+        analysis_result[
+            "exposure_type"
+        ]
+    )
+
+    exposure_effects = (
+        adjusted.get(
+            "exposure_effects",
+            []
+        )
+    )
+
+    if not exposure_effects:
+        raise VisualizationError(
+            "조정된 관심 변수 효과가 없습니다."
+        )
+
+    metadata = (
+        adjusted.get(
+            "exposure_metadata",
+            {}
+        )
+    )
+
+    rows: list[dict] = []
+
+    for effect in exposure_effects:
+        odds_ratio = float(
+            effect[
+                "odds_ratio"
+            ]
+        )
+
+        ci_low = float(
+            effect[
+                "ci_95_low"
+            ]
+        )
+
+        ci_high = float(
+            effect[
+                "ci_95_high"
+            ]
+        )
+
+        if (
+            odds_ratio <= 0
+            or ci_low <= 0
+            or ci_high <= 0
+        ):
+            raise VisualizationError(
+                "Odds Ratio와 신뢰구간은 "
+                "양수여야 합니다."
+            )
+
+        rows.append(
+            {
+                "label": (
+                    _exposure_effect_label(
+                        term=str(
+                            effect[
+                                "term"
+                            ]
+                        ),
+                        exposure=exposure,
+                        exposure_type=(
+                            exposure_type
+                        ),
+                        metadata=metadata,
+                    )
+                ),
+                "odds_ratio": (
+                    odds_ratio
+                ),
+                "ci_low": (
+                    ci_low
+                ),
+                "ci_high": (
+                    ci_high
+                ),
+                "p_value": float(
+                    effect[
+                        "p_value"
+                    ]
+                ),
+            }
+        )
+
+    chart_data = (
+        pd.DataFrame(
+            rows
+        )
+        .sort_values(
+            "odds_ratio",
+            ascending=True,
+        )
+    )
+
+    error_plus = (
+        chart_data[
+            "ci_high"
+        ]
+        - chart_data[
+            "odds_ratio"
+        ]
+    )
+
+    error_minus = (
+        chart_data[
+            "odds_ratio"
+        ]
+        - chart_data[
+            "ci_low"
+        ]
+    )
+
+    figure = go.Figure()
+
+    figure.add_trace(
+        go.Scatter(
+            x=chart_data[
+                "odds_ratio"
+            ],
+            y=chart_data[
+                "label"
+            ],
+            mode="markers",
+            customdata=np.column_stack(
+                [
+                    chart_data[
+                        "ci_low"
+                    ],
+                    chart_data[
+                        "ci_high"
+                    ],
+                    chart_data[
+                        "p_value"
+                    ],
+                ]
+            ),
+            error_x={
+                "type": "data",
+                "symmetric": False,
+                "array": error_plus,
+                "arrayminus": error_minus,
+            },
+            hovertemplate=(
+                "%{y}"
+                "<br>Adjusted OR: %{x:.3f}"
+                "<br>95% CI: "
+                "%{customdata[0]:.3f}"
+                " – "
+                "%{customdata[1]:.3f}"
+                "<br>p-value: "
+                "%{customdata[2]:.4g}"
+                "<extra></extra>"
+            ),
+            name="Adjusted OR",
+        )
+    )
+
+    figure.add_vline(
+        x=1,
+        line_dash="dash",
+        annotation_text="OR = 1",
+    )
+
+    figure.update_layout(
+        title=(
+            f"{exposure}의 조정된 Odds Ratio"
+        ),
+        xaxis_title=(
+            "Adjusted Odds Ratio "
+            "(log scale)"
+        ),
+        yaxis_title="",
+        showlegend=False,
+    )
+
+    figure.update_xaxes(
+        type="log"
+    )
+
+    return figure
+
+
+# ============================================================
+# PSM 균형 시각화
+# ============================================================
+
+def plot_psm_balance(
+    balance: pd.DataFrame,
+    *,
+    threshold: float = 0.1,
+    top_n: int = 20,
+) -> go.Figure:
+    """PSM의 매칭 전후 SMD를 Love Plot 형태로 표시한다.
+
+    statistics.py에서 반환한 balance DataFrame을 직접 사용하며,
+    CSV 파일을 다시 읽지 않는다.
+    """
+
+    _require_columns(
+        balance,
+        [
+            "covariate",
+            "smd_before",
+            "smd_after",
+        ],
+        "PSM 균형 시각화",
+    )
+
+    if top_n < 1:
+        raise VisualizationError(
+            "top_n은 1 이상이어야 합니다."
+        )
+
+    chart_data = (
+        balance.copy()
+    )
+
+    chart_data[
+        "max_smd"
+    ] = (
+        chart_data[
             [
                 "smd_before",
                 "smd_after",
             ]
         ]
+        .replace(
+            [
+                np.inf,
+                -np.inf,
+            ],
+            np.nan,
+        )
         .abs()
         .max(axis=1)
     )
 
-    top_balance = (
-        balance.loc[non_missing_dummy]
+    chart_data = (
+        chart_data
         .sort_values(
-            by="max_smd",
+            "max_smd",
             ascending=False,
         )
-        .head(15)
+        .head(top_n)
         .sort_values(
-            by="max_smd",
+            "max_smd",
             ascending=True,
         )
-        .reset_index(drop=True)
     )
-    y_pos = range(len(top_balance))
-    plt.figure(figsize=(8, 8))
-    plt.hlines(
-        y=y_pos,
-        xmin=0,
-        xmax=top_balance[["smd_before", "smd_after"]].to_numpy().max(axis=1),
-        color="lightgray",
-        linewidth=1,
+
+    figure = go.Figure()
+
+    figure.add_trace(
+        go.Scatter(
+            x=chart_data[
+                "smd_before"
+            ],
+            y=chart_data[
+                "covariate"
+            ],
+            mode="markers",
+            name="매칭 전",
+            hovertemplate=(
+                "%{y}"
+                "<br>매칭 전 SMD: %{x:.3f}"
+                "<extra></extra>"
+            ),
+        )
     )
-    plt.scatter(top_balance["smd_before"], y_pos, color="#C44E52", label="Before matching", zorder=3)
-    plt.scatter(top_balance["smd_after"], y_pos, color="#4C72B0", label="After matching", zorder=3)
-    plt.axvline(0.1, color="black", linestyle="--", linewidth=1, label="SMD = 0.1 threshold")
-    plt.yticks(list(y_pos), top_balance["covariate"].tolist())
-    plt.xlabel("Standardized mean difference (SMD)")
-    plt.ylabel("Covariate")
-    plt.title("Covariate balance before vs after PSM matching")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(FIGURE_DIR / "psm_balance_love_plot.png", dpi=160)
-    plt.close()
+
+    figure.add_trace(
+        go.Scatter(
+            x=chart_data[
+                "smd_after"
+            ],
+            y=chart_data[
+                "covariate"
+            ],
+            mode="markers",
+            name="매칭 후",
+            hovertemplate=(
+                "%{y}"
+                "<br>매칭 후 SMD: %{x:.3f}"
+                "<extra></extra>"
+            ),
+        )
+    )
+
+    figure.add_vline(
+        x=threshold,
+        line_dash="dash",
+        annotation_text=(
+            f"SMD = {threshold}"
+        ),
+    )
+
+    figure.update_layout(
+        title=(
+            "PSM 매칭 전후 통제변수 균형"
+        ),
+        xaxis_title=(
+            "Absolute Standardized "
+            "Mean Difference"
+        ),
+        yaxis_title="",
+    )
+
+    return figure
 
 
 # ============================================================
-# [그룹 비교] 3단계 분석 효과 크기 비교 (Plotly)
-# - welch_ttest.json(단순 비교) + psm_result.json(주 PSM) + psm_sensitivity_result.json(민감도 분석) 사용
-# - x축: 분석 단계(1.단순 비교 / 2.주 PSM / 3.민감도 분석), y축: 고소득률 차이(학위 있음 - 없음, %p 단위)
-# - "작은 p-value는 효과 크기를 의미하지 않는다"는 설계 문서 해석 원칙을 시각적으로 뒷받침
-# - hover로 p-value, 매칭 표본 수(matched_pairs) 확인 — 단계별 표본 규모 차이도 함께 보고
-# - statistics 단계를 먼저 실행해야 세 파일이 모두 존재 — 하나라도 없으면 경고만 출력하고 건너뜀
+# 고소득 예측 확률 시각화
 # ============================================================
-def plot_effect_comparison() -> None:
-    welch_path = TABLE_DIR / "welch_ttest.json"
-    psm_path = TABLE_DIR / "psm_result.json"
-    sensitivity_path = TABLE_DIR / "psm_sensitivity_result.json"
-    if not (welch_path.exists() and psm_path.exists() and sensitivity_path.exists()):
-        print("[시각화 경고] welch_ttest/psm_result/psm_sensitivity_result.json 중 일부가 없습니다. statistics 단계를 먼저 실행하세요.")
-        return
 
-    welch = json.loads(welch_path.read_text(encoding="utf-8"))
-    psm = json.loads(psm_path.read_text(encoding="utf-8"))
-    sensitivity = json.loads(sensitivity_path.read_text(encoding="utf-8"))
+def plot_prediction_probability(
+    result: dict,
+) -> go.Figure:
+    """한 입력의 고소득 예측 확률을 사용자용 그래프로 표시한다."""
 
-    # welch/psm 결과의 effect는 0.32 같은 비율(fraction)이라, 그대로 쓰면 "0.32%"인지
-    # "32%p"인지 헷갈린다. 100을 곱해 %p(백분위 포인트) 단위로 명시한다.
-    # effect_pp는 round(2)로 hover 소수점을 줄인다. p_value는 statistics.py가
-    # p_value == 0(1e-300 미만이라 float64 표현 범위를 벗어나 0으로 언더플로된 경우)을
-    # "< 1e-300" 문자열로 바꿔둔 p_value_display를 그대로 쓴다 — raw p_value(float)를
-    # 그대로 hover에 포맷하면 0.0인 값은 어떤 소수점/유효숫자 포맷을 적용해도 그대로
-    # "0"으로 찍혀 유의성 정보가 사라진다.
-    effect_summary = pd.DataFrame(
-        [
-            {
-                "stage": "1. Naive comparison",
-                "effect_pp": round(welch["mean_difference"] * 100, 2),
-                "p_value": welch["p_value_display"],
-                "sample_note": "all rows (unmatched)",
-            },
-            {
-                "stage": "2. Main PSM",
-                "effect_pp": round(psm["matched_rate_difference"] * 100, 2),
-                "p_value": psm["p_value_display"],
-                "sample_note": f"{psm['matched_pairs']} matched pairs",
-            },
-            {
-                "stage": "3. Sensitivity PSM",
-                "effect_pp": round(sensitivity["matched_rate_difference"] * 100, 2),
-                "p_value": sensitivity["p_value_display"],
-                "sample_note": f"{sensitivity['matched_pairs']} matched pairs",
-            },
+    if not isinstance(
+        result,
+        dict,
+    ):
+        raise VisualizationError(
+            "예측 결과는 dict여야 합니다."
+        )
+
+    prediction = result.get(
+        "prediction"
+    )
+
+    if not isinstance(
+        prediction,
+        dict,
+    ):
+        raise VisualizationError(
+            "예측 결과에 prediction 정보가 없습니다."
+        )
+
+    if (
+        "high_income_probability"
+        not in prediction
+    ):
+        raise VisualizationError(
+            "예측 결과에 고소득 확률이 없습니다."
+        )
+
+    probability = float(
+        prediction[
+            "high_income_probability"
         ]
     )
-    fig = px.bar(
-        effect_summary,
-        x="stage",
-        y="effect_pp",
-        hover_data=["p_value", "sample_note"],
-        title="Interactive high-income rate difference by analysis stage",
-        labels={"stage": "Analysis stage", "effect_pp": "High-income rate difference (%p, degree - no degree)"},
+
+    if not (
+        0 <= probability <= 1
+    ):
+        raise VisualizationError(
+            "고소득 예측 확률은 "
+            "0과 1 사이여야 합니다."
+        )
+
+    chart_data = pd.DataFrame(
+        {
+            "income_class": [
+                "<=50K",
+                ">50K",
+            ],
+            "probability_percent": [
+                (
+                    1
+                    - probability
+                )
+                * 100,
+                probability
+                * 100,
+            ],
+        }
     )
-    fig.write_html(FIGURE_DIR / "effect_size_comparison.html", include_plotlyjs="cdn")
+
+    figure = px.bar(
+        chart_data,
+        x="probability_percent",
+        y="income_class",
+        orientation="h",
+        text="probability_percent",
+        title="입력 조건의 고소득 예측 확률",
+        labels={
+            "income_class": (
+                "소득 클래스"
+            ),
+            "probability_percent": (
+                "모델 예측 확률 (%)"
+            ),
+        },
+    )
+
+    figure.update_traces(
+        texttemplate="%{text:.1f}%",
+        textposition="outside",
+        hovertemplate=(
+            "%{y}"
+            "<br>예측 확률: %{x:.2f}%"
+            "<extra></extra>"
+        ),
+    )
+
+    figure.update_xaxes(
+        range=[
+            0,
+            100,
+        ]
+    )
+
+    figure.update_layout(
+        showlegend=False
+    )
+
+    return figure
 
 
 # ============================================================
-# [분포] 수치형 변수 상관관계 히트맵 (Seaborn)
-# - statistics.py가 저장한 correlations.csv 사용 (수치형 컬럼 전체 상관계수 행렬)
-# - 대각선 위 삼각형은 아래 삼각형과 대칭이라 마스킹해 중복 정보를 없앰
-# - 상관계수는 -1~1의 방향성 있는 값이라 0을 중심으로 하는 발산형 컬러맵 사용
-# - statistics 단계를 먼저 실행해야 파일이 존재 — 없으면 경고만 출력하고 건너뜀
+# 연관성 분석 시각화 묶음
 # ============================================================
-def plot_correlation_heatmap() -> None:
-    correlations_path = TABLE_DIR / "correlations.csv"
-    if not correlations_path.exists():
-        print("[시각화 경고] correlations.csv가 없습니다. statistics 단계를 먼저 실행하세요.")
-        return
 
-    correlations = pd.read_csv(correlations_path, index_col=0)
-    mask = np.triu(np.ones_like(correlations, dtype=bool), k=1)
-    plt.figure(figsize=(9, 8))
-    ax = sns.heatmap(
-        correlations,
-        mask=mask,
-        cmap="coolwarm",
-        vmin=-1,
-        vmax=1,
-        center=0,
-        annot=True,
-        fmt=".2f",
-        square=True,
-        linewidths=0.5,
-        cbar_kws={"label": "Correlation coefficient"},
+def create_association_visualizations(
+    result: dict,
+) -> dict[str, go.Figure]:
+    """한 연관성 분석 결과에 필요한 사용자용 Figure를 생성한다."""
+
+    figures = {
+        "unadjusted": (
+            plot_unadjusted_association(
+                result
+            )
+        ),
+        "adjusted": (
+            plot_adjusted_association(
+                result
+            )
+        ),
+    }
+
+    psm = (
+        result[
+            "analysis"
+        ].get(
+            "psm"
+        )
     )
-    ax.set_title("Correlation heatmap of numeric features")
-    plt.tight_layout()
-    plt.savefig(FIGURE_DIR / "correlation_heatmap.png", dpi=160)
-    plt.close()
 
+    if psm is not None:
+        balance = pd.DataFrame(
+            psm[
+                "balance"
+            ]
+        )
 
-def create_visualizations(df: pd.DataFrame) -> None:
-    sns.set_theme(style="whitegrid")
+        figures[
+            "psm_balance"
+        ] = (
+            plot_psm_balance(
+                balance
+            )
+        )
 
-    plot_education_income_rate(df)
-    plot_age_distribution(df)
-    plot_capital_gain_indicator(df)
-    plot_race_sex_income_rate(df)
-    plot_psm_balance()
-    plot_effect_comparison()
-    plot_correlation_heatmap()
+    return figures
+
+def plot_prediction_explanation(
+    result: dict,
+    *,
+    top_n: int = 8,
+) -> go.Figure:
+    """현재 입력값을 대표값으로 바꿨을 때의 예측 확률 차이를 표시한다."""
+
+    explanation = (
+        result.get(
+            "explanation",
+            {}
+        )
+    )
+
+    features = explanation.get(
+        "features"
+    )
+
+    if not features:
+        raise VisualizationError(
+            "개인 예측 설명 데이터가 없습니다."
+        )
+
+    chart_data = (
+        pd.DataFrame(
+            features
+        )
+        .head(
+            top_n
+        )
+        .sort_values(
+            "impact_percentage_points",
+            ascending=True,
+        )
+    )
+
+    figure = px.bar(
+        chart_data,
+        x="impact_percentage_points",
+        y="feature",
+        orientation="h",
+        custom_data=[
+            "current_value",
+            "reference_value",
+        ],
+        title=(
+            "현재 입력값에 따른 모델 예측 변화"
+        ),
+        labels={
+            "feature": "변수",
+            "impact_percentage_points": (
+                "대표값 대비 예측 확률 차이 (%p)"
+            ),
+        },
+    )
+
+    figure.add_vline(
+        x=0,
+        line_dash="dash",
+    )
+
+    figure.update_traces(
+        hovertemplate=(
+            "%{y}"
+            "<br>확률 차이: %{x:.2f}%p"
+            "<br>현재 값: %{customdata[0]}"
+            "<br>대표값: %{customdata[1]}"
+            "<extra></extra>"
+        )
+    )
+
+    return figure
+
+def plot_what_if_simulation(
+    what_if: pd.DataFrame,
+) -> go.Figure:
+    """한 변수의 값만 변경했을 때 모델 예측 확률의 변화를 표시한다."""
+
+    _require_columns(
+        what_if,
+        [
+            "feature",
+            "value",
+            "high_income_probability_percent",
+        ],
+        "What-if 시각화",
+    )
+
+    if what_if.empty:
+        raise VisualizationError(
+            "What-if 결과가 비어 있습니다."
+        )
+
+    feature = str(
+        what_if[
+            "feature"
+        ].iloc[0]
+    )
+
+    numeric_values = pd.to_numeric(
+        what_if[
+            "value"
+        ],
+        errors="coerce",
+    )
+
+    # 모든 값이 숫자로 해석되면 연속적인 변화로 표시한다.
+    if numeric_values.notna().all():
+        chart_data = (
+            what_if.copy()
+        )
+
+        chart_data[
+            "value"
+        ] = numeric_values
+
+        chart_data = (
+            chart_data
+            .sort_values(
+                "value"
+            )
+        )
+
+        figure = px.line(
+            chart_data,
+            x="value",
+            y=(
+                "high_income_probability_percent"
+            ),
+            markers=True,
+            title=(
+                f"{feature} 변화에 따른 모델 예측 확률"
+            ),
+            labels={
+                "value": feature,
+                "high_income_probability_percent": (
+                    "고소득 예측 확률 (%)"
+                ),
+            },
+        )
+
+    else:
+        figure = px.bar(
+            what_if,
+            x="value",
+            y=(
+                "high_income_probability_percent"
+            ),
+            title=(
+                f"{feature} 변화에 따른 모델 예측 확률"
+            ),
+            labels={
+                "value": feature,
+                "high_income_probability_percent": (
+                    "고소득 예측 확률 (%)"
+                ),
+            },
+        )
+
+    figure.update_yaxes(
+        range=[
+            0,
+            100,
+        ]
+    )
+
+    figure.update_traces(
+        hovertemplate=(
+            f"{feature}: %{{x}}"
+            "<br>고소득 예측 확률: %{y:.2f}%"
+            "<extra></extra>"
+        )
+    )
+
+    return figure

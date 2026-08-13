@@ -14,9 +14,11 @@ from src.config import (
     ensure_directories,
 )
 
-VALID_INCOME_LABELS = frozenset{
+VALID_INCOME_LABELS = frozenset(
+    {
     "<=50K",">50K",
-}
+    }
+)
 
 # CSV에서 숫자로 해석되어야 하는 원본 변수.
 # 변환할 수 없는 값은 결측값으로 처리한다.

@@ -1,22 +1,28 @@
-"""고소득 여부 예측용 sklearn Pipeline.
+"""Adult Census Income 고소득 예측 모델.
 
-담당: 원광식 (ML 모델링)
+이 모듈은 연관성 분석을 수행하지 않는다.
 
-모델·하이퍼파라미터는 scripts/experiments/model_selection_experiment.py의 실제 탐색
-결과로 채택했다 (비교 대상·근거: docs/MODEL_SELECTION_LOG.md).
+주요 역할:
+    1. 고소득 여부 예측 모델 학습·평가
+    2. 학습된 모델과 입력 스키마 저장
+    3. 사용자 입력의 고소득 확률 예측
+    4. 개인 예측에 대한 모델 기반 설명 생성
+    5. 입력값 변화에 따른 What-if 예측 생성
 
-전처리는 원-핫 인코딩 대신 네이티브 범주형 처리(categorical_features="from_dtype")를
-쓴다. BEST_MODEL_PARAMS는 원-핫 기준으로 탐색됐지만 네이티브 범주형으로 재검증해도
-그대로 유효함을 확인했다 (docs/MODEL_SELECTION_LOG.md "재검증" 절).
+주의:
+    모델의 예측 확률, feature importance, 개인별 feature impact,
+    What-if 결과는 모두 머신러닝 모델의 예측 결과이다.
+    변수의 인과효과를 의미하지 않는다.
 """
 
 from __future__ import annotations
 
+from copy import deepcopy
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import json
 import logging
 import platform
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
 
 import joblib
 import numpy as np
@@ -26,291 +32,884 @@ from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.inspection import permutation_importance
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 
-from src.config import MODEL_DIR, RANDOM_STATE, TABLE_DIR
+from src.config import (
+    ANALYSIS_VARIABLE_TYPES,
+    MODEL_DIR,
+    PREDICTION_FEATURE_COLUMNS,
+    RANDOM_STATE,
+    TABLE_DIR,
+    TARGET_COLUMN,
+    ensure_directories,
+)
+
 
 logger = logging.getLogger(__name__)
 
-TARGET_COLUMN = "high_income"
-# income은 정답 원문, education-num은 education과 중복, fnlwgt는 표본 가중치이므로 제외한다.
-EXCLUDED_COLUMNS = ["income", "high_income", "education-num", "fnlwgt"]
-# 성별·인종처럼 특정 집단만 예측을 놓치고 있는지 확인하기 위해 지정한 민감 변수.
-FAIRNESS_GROUP_COLUMNS = ["sex", "race"]
-# test_size=0.2에서 stratify가 실패하지 않으려면 클래스별로 최소 몇 개는 있어야 하므로, 그 하한선을 미리 정해둔다.
+
+# ============================================================
+# 모델 설정
+# ============================================================
+
+MODEL_BUNDLE_PATH = (
+    MODEL_DIR
+    / "income_model_bundle.joblib"
+)
+
+FAIRNESS_GROUP_COLUMNS = [
+    "sex",
+    "race",
+]
+
 MIN_SAMPLES_PER_CLASS = 10
-# 양성 표본이 이보다 적으면 한두 명만 틀려도 recall이 크게 흔들리므로, 그 집단의 진단은 참고용으로만 본다.
 MIN_RELIABLE_GROUP_POSITIVES = 30
-# 신뢰 가능한(표본 충분한) 집단 중 recall이 이보다 낮으면 그 집단만 유독 놓치고 있다고 보고 경고한다.
+
 FAIRNESS_MIN_GROUP_RECALL = 0.60
-# 신뢰 가능한 집단 간 recall 최대-최소 격차가 이보다 크면 형평성 문제로 보고 경고한다.
 FAIRNESS_MAX_RECALL_GAP = 0.10
 
-# HistGradientBoosting을 채택한 이유: docs/MODEL_SELECTION_LOG.md 실험에서 교차검증 ROC-AUC가
-# 가장 높았고(0.9258) 탐색 시간도 더 짧았기 때문이다 (Logistic Regression·Random Forest 대비).
-BEST_MODEL_PARAMS = {
-    "learning_rate": 0.14447746112718687,
+
+MODEL_PARAMS = {
+    "learning_rate": (
+        0.14447746112718687
+    ),
     "max_depth": 5,
     "max_iter": 154,
-    "l2_regularization": 0.45606998421703593,
+    "l2_regularization": (
+        0.45606998421703593
+    ),
 }
 
 
 class ModelingError(RuntimeError):
-    """데이터 인입 시점부터 학습·저장·추론까지, 이 모듈이 던지는 모든 오류의 기반 클래스."""
+    """모델 학습·저장·추론 과정에서 발생하는 오류."""
 
 
 @dataclass
 class ModelEvaluation:
-    """학습·평가 결과를 담는 컨테이너. 디스크 저장 없이 순수하게 값만 갖고 있어서
-    pytest에서 파일 I/O 없이 바로 검증할 수 있다 (tests/ 담당자용).
-    """
+    """모델 학습·평가 결과를 메모리에서 전달하는 컨테이너."""
 
     pipeline: Pipeline
     metrics: dict
     fairness: pd.DataFrame
     feature_importance: pd.DataFrame
     predictions: pd.DataFrame
-    model_card: dict = field(default_factory=dict)
+    input_schema: dict
+    model_card: dict = field(
+        default_factory=dict
+    )
 
 
-def _validate_input(df: pd.DataFrame) -> None:
-    """df가 학습에 필요한 데이터 계약(타깃 컬럼, 클래스 수/균형 등)을 만족하는지 확인한다.
-    여기서 잡아야 sklearn 내부 에러로 애매하게 터지는 걸 막는다.
-    """
-    if df is None or not isinstance(df, pd.DataFrame):
-        raise ModelingError("train_income_model()은 pandas.DataFrame을 받아야 합니다.")
-    if df.empty:
-        raise ModelingError("모델 학습용 데이터프레임이 비어 있습니다.")
-    if TARGET_COLUMN not in df.columns:
+# ============================================================
+# 피처 설정
+# ============================================================
+
+def _feature_type_columns(
+) -> tuple[
+    list[str],
+    list[str],
+]:
+    """config.py 기준으로 예측 피처를 수치형과 범주형으로 구분한다."""
+
+    unknown_features = [
+        column
+        for column in PREDICTION_FEATURE_COLUMNS
+        if column
+        not in ANALYSIS_VARIABLE_TYPES
+    ]
+
+    if unknown_features:
         raise ModelingError(
-            f"타깃 컬럼 '{TARGET_COLUMN}'이 없습니다. "
-            "src.data의 정제 함수(clean_data 등)를 거친 데이터인지 확인하세요."
+            "예측 변수의 타입 설정이 없습니다: "
+            f"{unknown_features}"
         )
 
-    _check_excluded_column_casing(df.columns)
+    numeric_columns = [
+        column
+        for column in PREDICTION_FEATURE_COLUMNS
+        if ANALYSIS_VARIABLE_TYPES[
+            column
+        ]
+        == "continuous"
+    ]
 
-    feature_columns = [column for column in df.columns if column not in EXCLUDED_COLUMNS]
-    if not feature_columns:
+    categorical_columns = [
+        column
+        for column in PREDICTION_FEATURE_COLUMNS
+        if ANALYSIS_VARIABLE_TYPES[
+            column
+        ]
+        in {
+            "binary",
+            "categorical",
+        }
+    ]
+
+    return (
+        numeric_columns,
+        categorical_columns,
+    )
+
+
+# ============================================================
+# 학습 데이터 검증
+# ============================================================
+
+def _prepare_training_data(
+    df: pd.DataFrame,
+) -> pd.DataFrame:
+    """모델 학습에 사용할 행과 열 구조를 검증한다."""
+
+    if not isinstance(
+        df,
+        pd.DataFrame,
+    ):
         raise ModelingError(
-            f"제외 컬럼({EXCLUDED_COLUMNS})을 뺀 뒤 남는 피처가 없습니다. 입력 df의 컬럼 구성을 확인하세요."
+            "모델 학습 입력은 "
+            "pandas.DataFrame이어야 합니다."
+        )
+
+    if df.empty:
+        raise ModelingError(
+            "모델 학습용 데이터가 비어 있습니다."
+        )
+
+    required_columns = [
+        TARGET_COLUMN,
+        *PREDICTION_FEATURE_COLUMNS,
+    ]
+
+    missing_columns = [
+        column
+        for column in required_columns
+        if column not in df.columns
+    ]
+
+    if missing_columns:
+        raise ModelingError(
+            "모델 학습에 필요한 변수가 없습니다: "
+            f"{missing_columns}"
+        )
+
+    # 결과변수가 없는 행은 지도학습에 사용할 수 없으므로
+    # 학습 단계에서만 제거한다.
+    model_df = (
+        df
+        .dropna(
+            subset=[
+                TARGET_COLUMN,
+            ]
+        )
+        .copy()
+        .reset_index(drop=True)
+    )
+
+    if model_df.empty:
+        raise ModelingError(
+            "target 결측값을 제외한 뒤 "
+            "학습 가능한 표본이 없습니다."
         )
 
     try:
-        target = df[TARGET_COLUMN].astype(int)
-    except (TypeError, ValueError) as exc:
+        target = pd.to_numeric(
+            model_df[
+                TARGET_COLUMN
+            ],
+            errors="raise",
+        )
+    except (
+        TypeError,
+        ValueError,
+    ) as exc:
         raise ModelingError(
-            f"타깃 컬럼 '{TARGET_COLUMN}'을 정수로 변환할 수 없습니다 (예: 결측치나 0/1이 아닌 값 포함). "
-            f"원본 예외: {exc}"
+            f"target '{TARGET_COLUMN}'을 "
+            "숫자로 해석할 수 없습니다."
         ) from exc
 
-    class_counts = target.value_counts()
-    if class_counts.shape[0] < 2:
+    target_values = set(
+        target.unique()
+    )
+
+    if target_values != {
+        0,
+        1,
+    }:
         raise ModelingError(
-            f"타깃 '{TARGET_COLUMN}'에 클래스가 {class_counts.shape[0]}개뿐이라 분류 모델을 학습할 수 없습니다."
-        )
-    if class_counts.min() < MIN_SAMPLES_PER_CLASS:
-        raise ModelingError(
-            f"타깃 클래스 중 표본이 너무 적습니다 (최소 클래스 {class_counts.min()}개, "
-            f"기준 {MIN_SAMPLES_PER_CLASS}개). train_test_split(stratify=...)이 실패할 수 있습니다."
+            f"target '{TARGET_COLUMN}'은 "
+            "0과 1을 모두 포함해야 합니다. "
+            f"현재 값: {target_values}"
         )
 
+    class_counts = (
+        target
+        .value_counts()
+    )
 
-def _check_excluded_column_casing(columns: pd.Index) -> None:
-    """스키마의 대소문자가 바뀌어 EXCLUDED_COLUMNS가 못 걸러내는 상황(예: income→Income)을
-    막는다. 대소문자만 다른 컬럼이 남아 있으면 조용히 통과시키지 않고 실패시켜, 정답 유출
-    대신 스키마를 고치도록 강제한다.
-    """
-    excluded_lower = {name.lower() for name in EXCLUDED_COLUMNS}
-    for column in columns:
-        if column in EXCLUDED_COLUMNS:
-            continue
-        if column.lower() in excluded_lower:
-            raise ModelingError(
-                f"컬럼 '{column}'이 제외 대상({EXCLUDED_COLUMNS})과 대소문자만 다른 이름으로 존재합니다. "
-                "스키마 변경(대소문자 변경)으로 정답/유출 컬럼이 피처에 섞여 들어갈 수 있으니, "
-                "EXCLUDED_COLUMNS를 갱신하거나 입력 데이터의 컬럼명을 표준화하세요."
+    if (
+        class_counts.min()
+        < MIN_SAMPLES_PER_CLASS
+    ):
+        raise ModelingError(
+            "target 클래스 중 표본이 너무 적습니다. "
+            f"최소 클래스={int(class_counts.min())}, "
+            f"필요 기준={MIN_SAMPLES_PER_CLASS}"
+        )
+
+    return model_df
+
+
+# ============================================================
+# 모델 입력 스키마
+# ============================================================
+
+def _build_input_schema(
+    X: pd.DataFrame,
+) -> dict:
+    """예측 입력 UI와 추론 검증에 사용할 기본 스키마를 생성한다."""
+
+    schema: dict = {
+        "feature_columns": list(
+            PREDICTION_FEATURE_COLUMNS
+        ),
+        "features": {},
+    }
+
+    for column in (
+        PREDICTION_FEATURE_COLUMNS
+    ):
+        variable_type = (
+            ANALYSIS_VARIABLE_TYPES[
+                column
+            ]
+        )
+
+        if variable_type == "continuous":
+            numeric = pd.to_numeric(
+                X[column],
+                errors="coerce",
             )
 
+            valid = (
+                numeric
+                .dropna()
+            )
 
-def _coerce_feature_dtypes(X: pd.DataFrame, categorical_columns: list[str]) -> pd.DataFrame:
-    """범주형 컬럼을 pandas category dtype으로 맞춘다 — HistGradientBoosting이
-    categorical_features="from_dtype"로 이 dtype만 범주형으로 인식한다. pd.NA는
-    sklearn이 못 읽으므로 np.nan으로 바꾼 뒤 변환한다 (결측 분기는 모델이 자체 처리).
-    """
-    X = X.copy()
-    for column in categorical_columns:
-        X[column] = X[column].astype(object).where(X[column].notna(), np.nan).astype("category")
-    return X
+            if valid.empty:
+                raise ModelingError(
+                    f"수치형 변수 '{column}'에 "
+                    "학습 가능한 값이 없습니다."
+                )
+
+            schema["features"][
+                column
+            ] = {
+                "type": (
+                    "continuous"
+                ),
+                "minimum": float(
+                    valid.min()
+                ),
+                "maximum": float(
+                    valid.max()
+                ),
+            }
+
+        else:
+            valid = (
+                X[column]
+                .dropna()
+                .astype(object)
+            )
+
+            if valid.empty:
+                raise ModelingError(
+                    f"범주형 변수 '{column}'에 "
+                    "학습 가능한 값이 없습니다."
+                )
+
+            levels = sorted(
+                valid.unique().tolist(),
+                key=lambda value: str(
+                    value
+                ),
+            )
+
+            schema["features"][
+                column
+            ] = {
+                "type": variable_type,
+                "levels": levels,
+            }
+
+    return schema
 
 
-def _split_features(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series, list[str], list[str]]:
-    """df를 (피처 X, 타깃 y)로 나누고, 전처리 단계에서 쓸 수 있게 컬럼을
-    수치형/범주형으로 분류해서 함께 반환한다.
-    """
-    feature_columns = [column for column in df.columns if column not in EXCLUDED_COLUMNS]
-    model_df = (df.dropna(subset=[TARGET_COLUMN]).copy())
-    X = df[feature_columns].copy()
-    y = df[TARGET_COLUMN].astype(int)
+def _add_training_references(
+    schema: dict,
+    X_train: pd.DataFrame,
+) -> dict:
+    """개인 예측 설명과 What-if에 사용할 학습셋 대표값을 추가한다."""
 
-    numeric_columns = X.select_dtypes(include="number").columns.tolist()
-    categorical_columns = X.select_dtypes(exclude="number").columns.tolist()
-    X = _coerce_feature_dtypes(X, categorical_columns)
+    result = deepcopy(
+        schema
+    )
 
-    return X, y, numeric_columns, categorical_columns
+    for column in (
+        PREDICTION_FEATURE_COLUMNS
+    ):
+        info = result[
+            "features"
+        ][column]
+
+        if (
+            info["type"]
+            == "continuous"
+        ):
+            values = pd.to_numeric(
+                X_train[column],
+                errors="coerce",
+            ).dropna()
+
+            if values.empty:
+                raise ModelingError(
+                    f"'{column}'의 학습셋 대표값을 "
+                    "계산할 수 없습니다."
+                )
+
+            info[
+                "reference_value"
+            ] = float(
+                values.median()
+            )
+
+            info[
+                "q05"
+            ] = float(
+                values.quantile(
+                    0.05
+                )
+            )
+
+            info[
+                "q95"
+            ] = float(
+                values.quantile(
+                    0.95
+                )
+            )
+
+        else:
+            values = (
+                X_train[column]
+                .dropna()
+                .astype(object)
+            )
+
+            mode = (
+                values.mode()
+            )
+
+            if mode.empty:
+                raise ModelingError(
+                    f"'{column}'의 학습셋 대표 범주를 "
+                    "계산할 수 없습니다."
+                )
+
+            info[
+                "reference_value"
+            ] = mode.iloc[0]
+
+    return result
 
 
-def _build_pipeline(numeric_columns: list[str], categorical_columns: list[str]) -> Pipeline:
-    """전처리(수치형 결측치 처리) + HistGradientBoosting을 하나의 Pipeline으로 묶는다.
+# ============================================================
+# 피처 dtype 통일
+# ============================================================
 
-    범주형은 OneHotEncoder 대신 category dtype 그대로 넘긴다(categorical_features=
-    "from_dtype") — 더미 변수 폭발을 피하고, 결측도 모델이 자체 처리해 별도 imputer가
-    필요 없다. set_output(transform="pandas")는 이 dtype을 ColumnTransformer 통과 후에도
-    보존하기 위함이다. 트리 기반이라 스케일에 영향받지 않으므로 스케일링은 뺐다.
-    """
-    preprocessing = ColumnTransformer(
+def _coerce_features(
+    X: pd.DataFrame,
+    input_schema: dict,
+    *,
+    allow_unknown_categories: bool = False,
+) -> pd.DataFrame:
+    """학습·추론 데이터의 dtype을 모델 입력 스키마와 맞춘다."""
+
+    expected_columns = (
+        input_schema[
+            "feature_columns"
+        ]
+    )
+
+    missing_columns = [
+        column
+        for column in expected_columns
+        if column not in X.columns
+    ]
+
+    if missing_columns:
+        raise ModelingError(
+            "예측에 필요한 입력 변수가 없습니다: "
+            f"{missing_columns}"
+        )
+
+    result = (
+        X[
+            expected_columns
+        ]
+        .copy()
+    )
+
+    for column in expected_columns:
+        info = (
+            input_schema[
+                "features"
+            ][column]
+        )
+
+        if (
+            info["type"]
+            == "continuous"
+        ):
+            original = (
+                result[column]
+            )
+
+            converted = pd.to_numeric(
+                original,
+                errors="coerce",
+            )
+
+            invalid_mask = (
+                original.notna()
+                & converted.isna()
+            )
+
+            if invalid_mask.any():
+                invalid_values = (
+                    original.loc[
+                        invalid_mask
+                    ]
+                    .unique()
+                    .tolist()
+                )
+
+                raise ModelingError(
+                    f"수치형 변수 '{column}'에 "
+                    "숫자로 변환할 수 없는 값이 있습니다: "
+                    f"{invalid_values}"
+                )
+
+            result[column] = (
+                converted.astype(
+                    float
+                )
+            )
+
+        else:
+            levels = (
+                info["levels"]
+            )
+
+            raw = (
+                result[column]
+                .astype(object)
+                .where(
+                    result[column]
+                    .notna(),
+                    np.nan,
+                )
+            )
+
+            unknown_mask = (
+                pd.Series(
+                    raw,
+                    index=result.index,
+                )
+                .notna()
+                & ~pd.Series(
+                    raw,
+                    index=result.index,
+                )
+                .isin(levels)
+            )
+
+            if unknown_mask.any():
+                if allow_unknown_categories:
+                    raw = raw.mask(
+                        unknown_mask,
+                        np.nan,
+                    )
+                else:
+                    unknown_values = (
+                        raw.loc[
+                            unknown_mask
+                        ]
+                        .unique()
+                        .tolist()
+                    )
+
+                    raise ModelingError(
+                        f"범주형 변수 '{column}'에 "
+                        "학습 당시 존재하지 않은 값이 있습니다: "
+                        f"{unknown_values}"
+                    )
+
+            result[column] = pd.Categorical(
+                raw,
+                categories=levels,
+            )
+
+    return result
+
+
+# ============================================================
+# sklearn Pipeline
+# ============================================================
+
+def _build_pipeline(
+    numeric_columns: list[str],
+    categorical_columns: list[str],
+) -> Pipeline:
+    """전처리와 HistGradientBoosting 모델을 하나의 Pipeline으로 구성한다."""
+
+    preprocessing = (
+        ColumnTransformer(
+            [
+                (
+                    "numeric",
+                    Pipeline(
+                        [
+                            (
+                                "imputer",
+                                SimpleImputer(
+                                    strategy="median"
+                                ),
+                            ),
+                        ]
+                    ),
+                    numeric_columns,
+                ),
+                (
+                    "categorical",
+                    "passthrough",
+                    categorical_columns,
+                ),
+            ]
+        )
+    )
+
+    preprocessing.set_output(
+        transform="pandas"
+    )
+
+    model = (
+        HistGradientBoostingClassifier(
+            categorical_features=(
+                "from_dtype"
+            ),
+            class_weight="balanced",
+            random_state=RANDOM_STATE,
+            **MODEL_PARAMS,
+        )
+    )
+
+    return Pipeline(
         [
             (
-                "numeric",
-                Pipeline([("imputer", SimpleImputer(strategy="median"))]),
-                numeric_columns,
+                "preprocessing",
+                preprocessing,
             ),
             (
-                "categorical",
-                "passthrough",
-                categorical_columns,
+                "model",
+                model,
             ),
         ]
     )
-    preprocessing.set_output(transform="pandas")
-    model = HistGradientBoostingClassifier(
-        categorical_features="from_dtype",
-        class_weight="balanced",
-        random_state=RANDOM_STATE,
-        **BEST_MODEL_PARAMS,
-    )
-    return Pipeline([("preprocessing", preprocessing), ("model", model)])
 
+
+# ============================================================
+# 모델 공정성 진단
+# ============================================================
 
 def _fairness_by_group(
-    df_test: pd.DataFrame, y_test: pd.Series, prediction: np.ndarray, group_columns: list[str]
+    df_test: pd.DataFrame,
+    y_test: pd.Series,
+    prediction: np.ndarray,
+    group_columns: list[str],
 ) -> pd.DataFrame:
-    """민감 변수(성별·인종) 집단별 Recall/False Negative Rate 진단표를 만든다.
-    `reliable=False`는 양성 표본이 적어(<MIN_RELIABLE_GROUP_POSITIVES) recall 추정이
-    불안정하다는 뜻 — 참고용으로만 본다.
-    """
-    rows = []
+    """집단별 Recall과 False Negative Rate를 계산한다."""
+
+    rows: list[dict] = []
+
+    prediction_series = pd.Series(
+        prediction,
+        index=y_test.index,
+    )
+
     for column in group_columns:
-        if column not in df_test.columns:
+        if (
+            column
+            not in df_test.columns
+        ):
             continue
-        for group_value, idx in df_test.groupby(column, observed=True).groups.items():
-            group_y = y_test.loc[idx]
-            group_pred = pd.Series(prediction, index=y_test.index).loc[idx]
-            positives = int((group_y == 1).sum())
+
+        groups = (
+            df_test
+            .groupby(
+                column,
+                observed=True,
+            )
+            .groups
+        )
+
+        for (
+            group_value,
+            indices,
+        ) in groups.items():
+            group_y = (
+                y_test.loc[
+                    indices
+                ]
+            )
+
+            group_prediction = (
+                prediction_series.loc[
+                    indices
+                ]
+            )
+
+            positives = int(
+                (
+                    group_y == 1
+                ).sum()
+            )
+
             if positives == 0:
                 continue
-            recall = recall_score(group_y, group_pred, zero_division=0)
+
+            recall = float(
+                recall_score(
+                    group_y,
+                    group_prediction,
+                    zero_division=0,
+                )
+            )
+
             rows.append(
                 {
-                    "group_column": column,
-                    "group_value": group_value,
-                    "n": int(len(idx)),
-                    "n_actual_positive": positives,
-                    "recall": float(recall),
-                    "false_negative_rate": float(1 - recall),
-                    "reliable": positives >= MIN_RELIABLE_GROUP_POSITIVES,
+                    "group_column": (
+                        column
+                    ),
+                    "group_value": (
+                        group_value
+                    ),
+                    "n": int(
+                        len(indices)
+                    ),
+                    "n_actual_positive": (
+                        positives
+                    ),
+                    "recall": recall,
+                    "false_negative_rate": (
+                        float(
+                            1
+                            - recall
+                        )
+                    ),
+                    "reliable": (
+                        positives
+                        >= MIN_RELIABLE_GROUP_POSITIVES
+                    ),
                 }
             )
-    return pd.DataFrame(rows)
+
+    return pd.DataFrame(
+        rows
+    )
 
 
-def _assess_fairness(fairness: pd.DataFrame) -> dict:
-    """집단별 recall 최저치/격차가 기준을 넘는지 판정하고, 위반 시 경고 로그를 남긴다.
-    reliable=False 집단은 추정 오차가 커 모델 결함인지 표본 부족인지 구분 못 하므로
-    판정에서 제외한다.
-    """
+def _assess_fairness(
+    fairness: pd.DataFrame,
+) -> dict:
+    """충분한 표본을 가진 집단의 Recall 격차를 진단한다."""
+
     if fairness.empty:
-        return {"status": "skipped", "reason": "그룹별 표본 없음"}
+        return {
+            "status": "skipped",
+            "reason": (
+                "그룹별 평가 표본 없음"
+            ),
+        }
 
-    reliable = fairness[fairness["reliable"]]
+    reliable = (
+        fairness.loc[
+            fairness[
+                "reliable"
+            ]
+        ]
+    )
+
     if reliable.empty:
-        return {"status": "skipped", "reason": "신뢰 가능한(표본 충분한) 집단 없음"}
+        return {
+            "status": "skipped",
+            "reason": (
+                "신뢰 가능한 집단 없음"
+            ),
+        }
 
-    violations = []
-    for column, group in reliable.groupby("group_column"):
-        min_recall_row = group.loc[group["recall"].idxmin()]
-        max_recall_row = group.loc[group["recall"].idxmax()]
-        min_recall = float(min_recall_row["recall"])
-        max_recall = float(max_recall_row["recall"])
-        recall_gap = max_recall - min_recall
+    violations: list[dict] = []
 
-        if min_recall < FAIRNESS_MIN_GROUP_RECALL:
+    for (
+        column,
+        group,
+    ) in reliable.groupby(
+        "group_column"
+    ):
+        minimum_row = (
+            group.loc[
+                group[
+                    "recall"
+                ].idxmin()
+            ]
+        )
+
+        maximum_row = (
+            group.loc[
+                group[
+                    "recall"
+                ].idxmax()
+            ]
+        )
+
+        minimum_recall = float(
+            minimum_row[
+                "recall"
+            ]
+        )
+
+        maximum_recall = float(
+            maximum_row[
+                "recall"
+            ]
+        )
+
+        recall_gap = (
+            maximum_recall
+            - minimum_recall
+        )
+
+        if (
+            minimum_recall
+            < FAIRNESS_MIN_GROUP_RECALL
+        ):
             violations.append(
                 {
-                    "group_column": column,
-                    "group_value": min_recall_row["group_value"],
-                    "type": "min_recall",
-                    "value": min_recall,
-                    "threshold": FAIRNESS_MIN_GROUP_RECALL,
-                }
-            )
-        if recall_gap > FAIRNESS_MAX_RECALL_GAP:
-            # 어느 집단을 고쳐야 할지 알 수 있게 최저/최고 집단을 함께 남긴다.
-            violations.append(
-                {
-                    "group_column": column,
-                    "type": "recall_gap",
-                    "value": recall_gap,
-                    "threshold": FAIRNESS_MAX_RECALL_GAP,
-                    "lowest_group_value": min_recall_row["group_value"],
-                    "lowest_group_recall": min_recall,
-                    "highest_group_value": max_recall_row["group_value"],
-                    "highest_group_recall": max_recall,
+                    "group_column": (
+                        column
+                    ),
+                    "group_value": (
+                        minimum_row[
+                            "group_value"
+                        ]
+                    ),
+                    "type": (
+                        "min_recall"
+                    ),
+                    "value": (
+                        minimum_recall
+                    ),
+                    "threshold": (
+                        FAIRNESS_MIN_GROUP_RECALL
+                    ),
                 }
             )
 
-    status = "fail" if violations else "pass"
-    if violations:
-        for violation in violations:
-            if violation["type"] == "min_recall":
-                logger.warning(
-                    "[공정성 경고] %s=%s 집단 recall(%.3f)이 기준(%.3f) 미달입니다.",
-                    violation["group_column"],
-                    violation["group_value"],
-                    violation["value"],
-                    violation["threshold"],
-                )
-            else:
-                logger.warning(
-                    "[공정성 경고] %s 집단 간 recall 격차(%.3f)가 기준(%.3f)을 초과했습니다 "
-                    "(최저 %s=%.3f vs 최고 %s=%.3f).",
-                    violation["group_column"],
-                    violation["value"],
-                    violation["threshold"],
-                    violation["lowest_group_value"],
-                    violation["lowest_group_recall"],
-                    violation["highest_group_value"],
-                    violation["highest_group_recall"],
-                )
+        if (
+            recall_gap
+            > FAIRNESS_MAX_RECALL_GAP
+        ):
+            violations.append(
+                {
+                    "group_column": (
+                        column
+                    ),
+                    "type": (
+                        "recall_gap"
+                    ),
+                    "value": (
+                        recall_gap
+                    ),
+                    "threshold": (
+                        FAIRNESS_MAX_RECALL_GAP
+                    ),
+                    "lowest_group_value": (
+                        minimum_row[
+                            "group_value"
+                        ]
+                    ),
+                    "lowest_group_recall": (
+                        minimum_recall
+                    ),
+                    "highest_group_value": (
+                        maximum_row[
+                            "group_value"
+                        ]
+                    ),
+                    "highest_group_recall": (
+                        maximum_recall
+                    ),
+                }
+            )
+
+    status = (
+        "fail"
+        if violations
+        else "pass"
+    )
+
+    for violation in violations:
+        logger.warning(
+            "[공정성 진단] %s: %s",
+            violation[
+                "group_column"
+            ],
+            violation,
+        )
 
     return {
         "status": status,
-        "min_recall_threshold": FAIRNESS_MIN_GROUP_RECALL,
-        "max_recall_gap_threshold": FAIRNESS_MAX_RECALL_GAP,
-        "violations": violations,
+        "min_recall_threshold": (
+            FAIRNESS_MIN_GROUP_RECALL
+        ),
+        "max_recall_gap_threshold": (
+            FAIRNESS_MAX_RECALL_GAP
+        ),
+        "violations": (
+            violations
+        ),
     }
 
 
-def _feature_importance(
-    pipeline: Pipeline, X_test: pd.DataFrame, y_test: pd.Series, n_repeats: int = 10
-) -> pd.DataFrame:
-    """테스트셋 기준 permutation importance를 계산한다.
+# ============================================================
+# 전체 모델 feature importance
+# ============================================================
 
-    HistGradientBoosting은 `.feature_importances_`가 없어 대신 쓴다. 원본 컬럼 단위로
-    나와서(더미 변수로 안 쪼개짐) "학력이 소득 예측에 얼마나 기여하는가"를 바로 보여준다.
-    """
+def _feature_importance(
+    pipeline: Pipeline,
+    X_test: pd.DataFrame,
+    y_test: pd.Series,
+    n_repeats: int = 10,
+) -> pd.DataFrame:
+    """테스트셋 기준 permutation importance를 계산한다."""
+
     result = permutation_importance(
         pipeline,
         X_test,
@@ -320,208 +919,854 @@ def _feature_importance(
         random_state=RANDOM_STATE,
         n_jobs=-1,
     )
-    importance = pd.DataFrame(
-        {
-            "feature": X_test.columns,
-            "importance_mean": result.importances_mean,
-            "importance_std": result.importances_std,
-        }
-    ).sort_values("importance_mean", ascending=False)
-    return importance.reset_index(drop=True)
 
+    importance = (
+        pd.DataFrame(
+            {
+                "feature": (
+                    X_test.columns
+                ),
+                "importance_mean": (
+                    result.importances_mean
+                ),
+                "importance_std": (
+                    result.importances_std
+                ),
+            }
+        )
+        .sort_values(
+            "importance_mean",
+            ascending=False,
+        )
+        .reset_index(
+            drop=True
+        )
+    )
+
+    return importance
+
+
+# ============================================================
+# 모델 메타데이터
+# ============================================================
 
 def _build_model_card(
+    *,
     metrics: dict,
     train_rows: int,
     test_rows: int,
-    feature_columns: list[str],
     fairness_assessment: dict,
 ) -> dict:
-    """재현용 메타데이터 — 나중에 같은 코드를 다시 돌렸을 때 "그때 결과"가 어떤 환경·
-    데이터 규모에서 나왔는지 추적한다. fairness_assessment는 진단표와 달리 pass/fail
-    판정까지 담아 CI/배포 게이트가 사람 없이도 확인할 수 있게 한다.
-    """
+    """학습된 모델의 재현·진단 메타데이터를 생성한다."""
+
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "model_name": metrics["model_name"],
-        "hyperparameters": BEST_MODEL_PARAMS,
-        "categorical_encoding": "native_from_dtype",
-        "random_state": RANDOM_STATE,
-        "train_rows": train_rows,
-        "test_rows": test_rows,
-        "feature_columns": feature_columns,
-        "sklearn_version": sklearn.__version__,
-        "python_version": platform.python_version(),
-        "selection_reference": "docs/MODEL_SELECTION_LOG.md",
-        "fairness_check": fairness_assessment,
+        "generated_at": (
+            datetime.now(
+                timezone.utc
+            ).isoformat()
+        ),
+        "model_name": (
+            metrics[
+                "model_name"
+            ]
+        ),
+        "hyperparameters": (
+            MODEL_PARAMS
+        ),
+        "random_state": (
+            RANDOM_STATE
+        ),
+        "train_rows": (
+            int(train_rows)
+        ),
+        "test_rows": (
+            int(test_rows)
+        ),
+        "feature_columns": list(
+            PREDICTION_FEATURE_COLUMNS
+        ),
+        "feature_types": {
+            column: (
+                ANALYSIS_VARIABLE_TYPES[
+                    column
+                ]
+            )
+            for column
+            in PREDICTION_FEATURE_COLUMNS
+        },
+        "sklearn_version": (
+            sklearn.__version__
+        ),
+        "python_version": (
+            platform.python_version()
+        ),
+        "fairness_check": (
+            fairness_assessment
+        ),
     }
 
 
-def evaluate_income_model(df: pd.DataFrame) -> ModelEvaluation:
-    """학습·평가만 하고 디스크엔 쓰지 않는다 (테스트용 진입점) — train_income_model()이
-    이걸 감싸 저장까지 하므로, tests/는 파일 I/O 없이 이 함수만 호출해 검증할 수 있다.
-    """
-    # 1. 데이터 계약 검증 (타깃 컬럼, 클래스 수/균형, 제외 컬럼 대소문자 등)
-    _validate_input(df)
+# ============================================================
+# 모델 학습·평가
+# ============================================================
 
-    # 2. 피처(X)/타깃(y) 분리 + 수치형/범주형 컬럼 구분
-    X, y, numeric_columns, categorical_columns = _split_features(df)
+def evaluate_income_model(
+    df: pd.DataFrame,
+) -> ModelEvaluation:
+    """모델을 학습·평가하고 결과 객체를 반환한다."""
 
-    # 3. 학습 80% / 테스트(held-out) 20% 분리 — 테스트셋은 최종 평가에만 쓴다.
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, stratify=y, random_state=RANDOM_STATE
+    model_df = (
+        _prepare_training_data(
+            df
+        )
     )
 
-    # 4. 파이프라인 구성 후 X_train만으로 학습 (imputer도 X_train에만 fit — 유출 없음)
-    pipeline = _build_pipeline(numeric_columns, categorical_columns)
-    try:
-        pipeline.fit(X_train, y_train)
-    except Exception as exc:
-        raise ModelingError(f"모델 학습에 실패했습니다: {exc}") from exc
+    raw_X = (
+        model_df[
+            PREDICTION_FEATURE_COLUMNS
+        ]
+        .copy()
+    )
 
-    # 5. 테스트셋으로 1회 예측 후 평가 지표 계산
-    prediction = pipeline.predict(X_test)
-    probability = pipeline.predict_proba(X_test)[:, 1]
+    y = (
+        pd.to_numeric(
+            model_df[
+                TARGET_COLUMN
+            ],
+            errors="raise",
+        )
+        .astype(int)
+    )
+
+    (
+        raw_X_train,
+        raw_X_test,
+        y_train,
+        y_test,
+    ) = train_test_split(
+        raw_X,
+        y,
+        test_size=0.2,
+        stratify=y,
+        random_state=RANDOM_STATE,
+    )
+
+    # 입력 스키마와 대표값은 학습 데이터만 이용한다.
+    input_schema = (
+        _build_input_schema(
+            raw_X_train
+        )
+    )
+
+    input_schema = (
+        _add_training_references(
+            input_schema,
+            raw_X_train,
+        )
+    )
+
+    X_train = _coerce_features(
+        raw_X_train,
+        input_schema,
+    )
+
+    X_test = _coerce_features(
+        raw_X_test,
+        input_schema,
+        allow_unknown_categories=True,
+    )
+
+    (
+        numeric_columns,
+        categorical_columns,
+    ) = _feature_type_columns()
+
+    pipeline = _build_pipeline(
+        numeric_columns,
+        categorical_columns,
+    )
+
+    try:
+        pipeline.fit(
+            X_train,
+            y_train,
+        )
+    except Exception as exc:
+        raise ModelingError(
+            f"모델 학습에 실패했습니다: {exc}"
+        ) from exc
+
+    try:
+        prediction = (
+            pipeline.predict(
+                X_test
+            )
+        )
+
+        probability = (
+            pipeline.predict_proba(
+                X_test
+            )[:, 1]
+        )
+
+    except Exception as exc:
+        raise ModelingError(
+            f"테스트셋 예측에 실패했습니다: {exc}"
+        ) from exc
 
     metrics = {
-        "model_name": "hist_gradient_boosting",
-        "test_rows": len(X_test),
-        "accuracy": float(accuracy_score(y_test, prediction)),
-        "precision": float(precision_score(y_test, prediction, zero_division=0)),
-        "recall": float(recall_score(y_test, prediction, zero_division=0)),
-        "f1": float(f1_score(y_test, prediction, zero_division=0)),
-        "roc_auc": float(roc_auc_score(y_test, probability)),
+        "model_name": (
+            "hist_gradient_boosting"
+        ),
+        "test_rows": int(
+            len(X_test)
+        ),
+        "accuracy": float(
+            accuracy_score(
+                y_test,
+                prediction,
+            )
+        ),
+        "precision": float(
+            precision_score(
+                y_test,
+                prediction,
+                zero_division=0,
+            )
+        ),
+        "recall": float(
+            recall_score(
+                y_test,
+                prediction,
+                zero_division=0,
+            )
+        ),
+        "f1": float(
+            f1_score(
+                y_test,
+                prediction,
+                zero_division=0,
+            )
+        ),
+        "roc_auc": float(
+            roc_auc_score(
+                y_test,
+                probability,
+            )
+        ),
     }
 
-    # 5-1. 컨퓨전매트릭스/ROC 커브는 집계 지표만으론 못 그리므로, 시각화 파트가 바로
-    #      읽을 수 있게 테스트셋 행 단위 예측값을 남긴다. row_id는 X_test 원본 인덱스.
     predictions = pd.DataFrame(
         {
-            "row_id": X_test.index,
-            "y_test": y_test.to_numpy(),
-            "y_pred": prediction,
-            "y_proba": probability,
+            "row_id": (
+                X_test.index
+            ),
+            "y_test": (
+                y_test.to_numpy()
+            ),
+            "y_pred": (
+                prediction
+            ),
+            "y_proba": (
+                probability
+            ),
         }
     )
 
-    # 6. 민감 변수(성별·인종)별 Recall/False Negative Rate 진단 + 기준 위반 판정
-    fairness = _fairness_by_group(X_test, y_test, prediction, FAIRNESS_GROUP_COLUMNS)
-    fairness_assessment = _assess_fairness(fairness)
+    fairness = _fairness_by_group(
+        X_test,
+        y_test,
+        prediction,
+        FAIRNESS_GROUP_COLUMNS,
+    )
 
-    # 7. 피처 중요도(permutation importance) — 팀의 인과추론 분석과 대조할 근거 자료
-    feature_importance = _feature_importance(pipeline, X_test, y_test)
+    fairness_assessment = (
+        _assess_fairness(
+            fairness
+        )
+    )
 
-    model_card = _build_model_card(
-        metrics, len(X_train), len(X_test), list(X.columns), fairness_assessment
+    feature_importance = (
+        _feature_importance(
+            pipeline,
+            X_test,
+            y_test,
+        )
+    )
+
+    model_card = (
+        _build_model_card(
+            metrics=metrics,
+            train_rows=len(
+                X_train
+            ),
+            test_rows=len(
+                X_test
+            ),
+            fairness_assessment=(
+                fairness_assessment
+            ),
+        )
     )
 
     return ModelEvaluation(
         pipeline=pipeline,
         metrics=metrics,
         fairness=fairness,
-        feature_importance=feature_importance,
+        feature_importance=(
+            feature_importance
+        ),
         predictions=predictions,
+        input_schema=(
+            input_schema
+        ),
         model_card=model_card,
     )
 
 
-def _save_outputs(evaluation: ModelEvaluation) -> None:
-    """학습된 파이프라인(joblib)과 평가 지표·진단 결과(json/csv)를 디스크에 남긴다.
+# ============================================================
+# 모델 저장
+# ============================================================
 
-    model_metrics.json, model_predictions.csv 모두 다른 파트가 파일명·컬럼명을
-    그대로 참조하므로 이름을 바꾸면 안 된다.
-    """
+def _save_outputs(
+    evaluation: ModelEvaluation,
+) -> None:
+    """배포용 모델 bundle과 개발용 평가 산출물을 저장한다."""
+
+    ensure_directories()
+
+    bundle = {
+        "pipeline": (
+            evaluation.pipeline
+        ),
+        "input_schema": (
+            evaluation.input_schema
+        ),
+        "model_card": (
+            evaluation.model_card
+        ),
+        "global_feature_importance": (
+            evaluation.feature_importance
+            .to_dict(
+                orient="records"
+            )
+        ),
+    }
+
     try:
-        MODEL_DIR.mkdir(parents=True, exist_ok=True)
-        TABLE_DIR.mkdir(parents=True, exist_ok=True)
-        joblib.dump(evaluation.pipeline, MODEL_DIR / "income_pipeline.joblib")
-        (TABLE_DIR / "model_metrics.json").write_text(
-            json.dumps(evaluation.metrics, ensure_ascii=False, indent=2), encoding="utf-8"
+        joblib.dump(
+            bundle,
+            MODEL_BUNDLE_PATH,
         )
-        (TABLE_DIR / "model_card.json").write_text(
-            json.dumps(evaluation.model_card, ensure_ascii=False, indent=2), encoding="utf-8"
+
+        (
+            TABLE_DIR
+            / "model_metrics.json"
+        ).write_text(
+            json.dumps(
+                evaluation.metrics,
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
         )
-        if not evaluation.fairness.empty:
-            evaluation.fairness.to_csv(TABLE_DIR / "model_fairness_by_group.csv", index=False)
+
+        (
+            TABLE_DIR
+            / "model_card.json"
+        ).write_text(
+            json.dumps(
+                evaluation.model_card,
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        (
+            TABLE_DIR
+            / "model_input_schema.json"
+        ).write_text(
+            json.dumps(
+                evaluation.input_schema,
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        evaluation.fairness.to_csv(
+            TABLE_DIR
+            / "model_fairness_by_group.csv",
+            index=False,
+        )
+
         evaluation.feature_importance.to_csv(
-            TABLE_DIR / "model_feature_importance.csv", index=False
+            TABLE_DIR
+            / "model_feature_importance.csv",
+            index=False,
         )
-        evaluation.predictions.to_csv(TABLE_DIR / "model_predictions.csv", index=False)
-    except (OSError, TypeError) as exc:
-        raise ModelingError(f"모델/지표 저장에 실패했습니다: {exc}") from exc
+
+        evaluation.predictions.to_csv(
+            TABLE_DIR
+            / "model_predictions.csv",
+            index=False,
+        )
+
+    except (
+        OSError,
+        TypeError,
+    ) as exc:
+        raise ModelingError(
+            f"모델 산출물 저장에 실패했습니다: {exc}"
+        ) from exc
 
 
-def train_income_model(df: pd.DataFrame) -> dict:
-    """main.py 진입점. 반환값(dict)의 키(accuracy/precision/recall/f1/roc_auc)는
-    src/report.py가 model_metrics.json에서 그대로 읽으므로 이름을 바꾸지 않는다.
-    """
+def train_income_model(
+    df: pd.DataFrame,
+) -> dict:
+    """고소득 예측 모델을 학습·평가하고 배포용 bundle을 저장한다."""
 
-    """target 결측 제거"""
-    model_df = (
-        df
-        .dropna(subset=[TARGET_COLUMN])
-        .copy()
-        .reset_index(drop=True)
+    evaluation = (
+        evaluate_income_model(
+            df
+        )
     )
-    X, y, numeric_columns, categorical_columns = (
-        _split_features(model_df)
-    )
-    evaluation = evaluate_income_model(df)
-    _save_outputs(evaluation)
 
-    print("\n[ML] 채택 모델: hist_gradient_boosting (근거: docs/MODEL_SELECTION_LOG.md)")
-    print("\n[ML] 테스트 성능")
-    print(pd.Series(evaluation.metrics).to_string())
-    if not evaluation.fairness.empty:
-        print("\n[ML] 집단별 Recall / False Negative Rate (reliable=False는 표본 부족으로 참고용)")
-        print(evaluation.fairness.to_string(index=False))
-    fairness_status = evaluation.model_card.get("fairness_check", {}).get("status")
-    print(f"\n[ML] 공정성 판정: {fairness_status}")
-    print("\n[ML] 피처 중요도 (permutation importance, 상위 5개)")
-    print(evaluation.feature_importance.head(5).to_string(index=False))
+    _save_outputs(
+        evaluation
+    )
 
     return evaluation.metrics
 
-def predict_income_input(
+
+# ============================================================
+# 저장된 모델 로딩
+# ============================================================
+
+def _load_model_bundle() -> dict:
+    """저장된 예측 모델과 입력 스키마를 불러온다."""
+
+    if not MODEL_BUNDLE_PATH.exists():
+        raise ModelingError(
+            "학습된 모델 bundle이 없습니다: "
+            f"{MODEL_BUNDLE_PATH}. "
+            "train_income_model()을 먼저 실행하세요."
+        )
+
+    try:
+        bundle = joblib.load(
+            MODEL_BUNDLE_PATH
+        )
+    except Exception as exc:
+        raise ModelingError(
+            f"모델 bundle을 불러오지 못했습니다: {exc}"
+        ) from exc
+
+    if not isinstance(
+        bundle,
+        dict,
+    ):
+        raise ModelingError(
+            "저장된 모델 bundle 형식이 올바르지 않습니다."
+        )
+
+    required_keys = {
+        "pipeline",
+        "input_schema",
+        "model_card",
+        "global_feature_importance",
+    }
+
+    def get_global_feature_importance(
+    ) -> pd.DataFrame:
+        """현재 배포 모델의 전체 테스트셋 permutation importance를 반환한다."""
+
+        bundle = (
+            _load_model_bundle()
+        )
+
+        return pd.DataFrame(
+            bundle[
+                "global_feature_importance"
+            ]
+        )
+
+    missing_keys = (
+        required_keys
+        - set(bundle)
+    )
+
+    if missing_keys:
+        raise ModelingError(
+            "모델 bundle에 필요한 항목이 없습니다: "
+            f"{sorted(missing_keys)}"
+        )
+
+    return bundle
+
+
+def get_prediction_input_schema() -> dict:
+    """웹 UI가 입력 폼을 구성할 수 있도록 학습 당시 입력 스키마를 반환한다."""
+
+    bundle = (
+        _load_model_bundle()
+    )
+
+    return deepcopy(
+        bundle[
+            "input_schema"
+        ]
+    )
+
+
+# ============================================================
+# 공통 추론
+# ============================================================
+
+def _prepare_prediction_frame(
+    df: pd.DataFrame,
+    bundle: dict,
+) -> pd.DataFrame:
+    """새 입력을 학습 당시 feature schema와 동일하게 변환한다."""
+
+    if not isinstance(
+        df,
+        pd.DataFrame,
+    ):
+        raise ModelingError(
+            "예측 입력은 pandas.DataFrame이어야 합니다."
+        )
+
+    if df.empty:
+        raise ModelingError(
+            "예측할 데이터가 비어 있습니다."
+        )
+
+    return _coerce_features(
+        df,
+        bundle[
+            "input_schema"
+        ],
+    )
+
+
+def _predict_with_bundle(
+    df: pd.DataFrame,
+    bundle: dict,
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+]:
+    """이미 로드된 bundle을 이용해 분류값과 고소득 확률을 계산한다."""
+
+    X = _prepare_prediction_frame(
+        df,
+        bundle,
+    )
+
+    pipeline: Pipeline = (
+        bundle[
+            "pipeline"
+        ]
+    )
+
+    try:
+        prediction = (
+            pipeline.predict(
+                X
+            )
+        )
+
+        probability = (
+            pipeline.predict_proba(
+                X
+            )[:, 1]
+        )
+
+    except Exception as exc:
+        raise ModelingError(
+            f"고소득 예측에 실패했습니다: {exc}"
+        ) from exc
+
+    return (
+        prediction,
+        probability,
+    )
+
+
+def predict_income(
+    df: pd.DataFrame,
+) -> pd.DataFrame:
+    """여러 입력 행에 대해 고소득 분류값과 확률을 반환한다."""
+
+    bundle = (
+        _load_model_bundle()
+    )
+
+    (
+        prediction,
+        probability,
+    ) = _predict_with_bundle(
+        df,
+        bundle,
+    )
+
+    return pd.DataFrame(
+        {
+            "prediction": (
+                prediction.astype(
+                    int
+                )
+            ),
+            "probability": (
+                probability
+            ),
+        },
+        index=df.index,
+    )
+
+
+# ============================================================
+# 개인 예측 설명
+# ============================================================
+
+def _validate_user_input(
     user_input: dict,
-) -> dict:
-    """웹/API에서 전달된 한 사람의 입력값으로 고소득 확률을 예측한다.
+    input_schema: dict,
+) -> None:
+    """홈페이지에서 받은 한 사람의 입력 key를 검증한다."""
 
-    기존 predict_income()의 DataFrame 추론 로직을 그대로 재사용하고,
-    웹에서 사용하기 쉬운 dict 형태로 결과를 반환한다.
-
-    주의:
-        반환되는 probability는 머신러닝 모델의 예측값이며,
-        특정 변수의 인과효과나 조정된 연관성을 의미하지 않는다.
-    """
-
-    if not isinstance(user_input, dict):
+    if not isinstance(
+        user_input,
+        dict,
+    ):
         raise ModelingError(
             "user_input은 dict 형태여야 합니다."
         )
 
     if not user_input:
         raise ModelingError(
-            "예측에 사용할 입력값이 없습니다."
+            "예측 입력값이 없습니다."
         )
 
-    input_df = pd.DataFrame(
-        [user_input]
-    )
-
-    prediction = predict_income(
-        input_df
-    )
-
-    predicted_class = int(
-        prediction.iloc[0][
-            "prediction"
+    expected = set(
+        input_schema[
+            "feature_columns"
         ]
     )
 
-    probability = float(
-        prediction.iloc[0][
-            "probability"
+    provided = set(
+        user_input
+    )
+
+    missing = sorted(
+        expected
+        - provided
+    )
+
+    unexpected = sorted(
+        provided
+        - expected
+    )
+
+    if missing:
+        raise ModelingError(
+            "예측에 필요한 입력 변수가 없습니다: "
+            f"{missing}"
+        )
+
+    if unexpected:
+        raise ModelingError(
+            "예측 모델에서 사용하지 않는 입력 변수가 있습니다: "
+            f"{unexpected}"
+        )
+
+
+def _local_feature_impacts(
+    user_input: dict,
+    bundle: dict,
+    original_probability: float,
+) -> pd.DataFrame:
+    """각 feature를 학습셋 대표값으로 하나씩 바꾸어 예측 변화량을 계산한다.
+
+    impact가 양수이면 현재 입력값이 해당 feature의 대표값보다
+    모델의 고소득 예측 확률을 높이는 방향이고,
+    음수이면 낮추는 방향이다.
+
+    각 feature를 독립적으로 한 번씩 바꾸는 방식이므로
+    impact 값들의 합은 전체 예측 확률과 일치하지 않는다.
+    """
+
+    schema = (
+        bundle[
+            "input_schema"
+        ]
+    )
+
+    rows: list[dict] = []
+
+    for feature in (
+        schema[
+            "feature_columns"
+        ]
+    ):
+        reference_value = (
+            schema[
+                "features"
+            ][feature][
+                "reference_value"
+            ]
+        )
+
+        modified_input = dict(
+            user_input
+        )
+
+        modified_input[
+            feature
+        ] = reference_value
+
+        modified_df = pd.DataFrame(
+            [
+                modified_input
+            ]
+        )
+
+        (
+            _,
+            baseline_probability,
+        ) = _predict_with_bundle(
+            modified_df,
+            bundle,
+        )
+
+        baseline_probability_value = (
+            float(
+                baseline_probability[
+                    0
+                ]
+            )
+        )
+
+        impact = float(
+            original_probability
+            - baseline_probability_value
+        )
+
+        rows.append(
+            {
+                "feature": (
+                    feature
+                ),
+                "current_value": (
+                    user_input[
+                        feature
+                    ]
+                ),
+                "reference_value": (
+                    reference_value
+                ),
+                "original_probability": (
+                    original_probability
+                ),
+                "reference_probability": (
+                    baseline_probability_value
+                ),
+                "impact_probability": (
+                    impact
+                ),
+                "impact_percentage_points": (
+                    impact
+                    * 100
+                ),
+            }
+        )
+
+    return (
+        pd.DataFrame(
+            rows
+        )
+        .assign(
+            absolute_impact=lambda frame: (
+                frame[
+                    "impact_probability"
+                ]
+                .abs()
+            )
+        )
+        .sort_values(
+            "absolute_impact",
+            ascending=False,
+        )
+        .drop(
+            columns=[
+                "absolute_impact",
+            ]
+        )
+        .reset_index(
+            drop=True
+        )
+    )
+
+
+def predict_income_input(
+    user_input: dict,
+) -> dict:
+    """한 사람의 입력값으로 고소득 확률과 개인별 예측 설명을 반환한다."""
+
+    bundle = (
+        _load_model_bundle()
+    )
+
+    input_schema = (
+        bundle[
+            "input_schema"
+        ]
+    )
+
+    _validate_user_input(
+        user_input,
+        input_schema,
+    )
+
+    input_df = pd.DataFrame(
+        [
+            user_input
+        ]
+    )
+
+    (
+        prediction,
+        probability,
+    ) = _predict_with_bundle(
+        input_df,
+        bundle,
+    )
+
+    predicted_class = int(
+        prediction[
+            0
+        ]
+    )
+
+    probability_value = float(
+        probability[
+            0
+        ]
+    )
+
+    explanation = (
+        _local_feature_impacts(
+            user_input,
+            bundle,
+            probability_value,
+        )
+    )
+
+    model_card = (
+        bundle[
+            "model_card"
         ]
     )
 
@@ -531,106 +1776,221 @@ def predict_income_input(
         ),
 
         "prediction": {
-            "predicted_class": predicted_class,
+            "predicted_class": (
+                predicted_class
+            ),
             "prediction_label": (
                 ">50K"
                 if predicted_class == 1
                 else "<=50K"
             ),
-            "high_income_probability": probability,
+            "high_income_probability": (
+                probability_value
+            ),
+        },
+
+        "explanation": {
+            "method": (
+                "single_feature_baseline_perturbation"
+            ),
+            "features": (
+                explanation
+                .to_dict(
+                    orient="records"
+                )
+            ),
+            "interpretation_note": (
+                "각 변수의 현재 값을 학습 데이터의 대표값으로 "
+                "하나씩 바꾸었을 때 예측 확률이 얼마나 변하는지 "
+                "비교한 모델 기반 설명입니다. "
+                "각 영향값은 서로 더할 수 없으며 인과효과를 의미하지 않습니다."
+            ),
+        },
+
+        "model": {
+            "model_name": (
+                model_card.get(
+                    "model_name"
+                )
+            ),
+            "trained_at": (
+                model_card.get(
+                    "generated_at"
+                )
+            ),
         },
 
         "interpretation_note": (
-            "이 결과는 학습된 머신러닝 모델의 예측값이며 "
-            "개별 변수의 인과효과를 의미하지 않습니다."
+            "고소득 확률은 학습된 머신러닝 모델이 "
+            "현재 입력 조건에 대해 출력한 예측값이며 "
+            "실제 소득이나 개별 변수의 인과효과를 의미하지 않습니다."
         ),
     }
 
-def predict_income(df: pd.DataFrame) -> pd.DataFrame:
-    """저장된 income_pipeline.joblib으로 새 데이터의 예측값/확률을 반환한다.
 
-    train_income_model()과 별도 프로세스(배포·배치)에서 쓰는 추론 진입점. 학습 때와
-    같은 방식(EXCLUDED_COLUMNS 제외, category dtype)으로 피처를 맞추므로, 입력에
-    타깃 컬럼이 있어도 없어도 동작한다.
+# ============================================================
+# What-if Simulation
+# ============================================================
+
+def simulate_income_what_if(
+    user_input: dict,
+    feature: str,
+    *,
+    values: list | None = None,
+    points: int = 15,
+) -> pd.DataFrame:
+    """다른 입력은 유지하고 하나의 feature만 변경한 예측 결과를 생성한다.
+
+    연속형 변수:
+        values가 없으면 학습셋 5~95 분위 범위에서 값을 생성한다.
+
+    범주형 변수:
+        values가 없으면 학습 당시 관측된 범주 전체를 사용한다.
+
+    Returns:
+        feature 값별 고소득 예측 확률 DataFrame.
     """
-    if df is None or not isinstance(df, pd.DataFrame):
-        raise ModelingError("predict_income()은 pandas.DataFrame을 받아야 합니다.")
-    if df.empty:
-        raise ModelingError("추론할 데이터프레임이 비어 있습니다.")
 
-    model_path = MODEL_DIR / "income_pipeline.joblib"
-    if not model_path.exists():
-        raise ModelingError(
-            f"학습된 파이프라인을 찾을 수 없습니다: {model_path}. "
-            "train_income_model()을 먼저 실행해 모델을 저장하세요."
-        )
-
-    feature_columns = [column for column in df.columns if column not in EXCLUDED_COLUMNS]
-    if not feature_columns:
-        raise ModelingError(
-            f"제외 컬럼({EXCLUDED_COLUMNS})을 뺀 뒤 남는 피처가 없습니다. 입력 df의 컬럼 구성을 확인하세요."
-        )
-
-    X = df[feature_columns].copy()
-    categorical_columns = X.select_dtypes(exclude="number").columns.tolist()
-    X = _coerce_feature_dtypes(X, categorical_columns)
-
-    try:
-        pipeline: Pipeline = joblib.load(
-            model_path
-        )
-    except Exception as exc:
-        raise ModelingError(
-            f"파이프라인을 불러오는 데 실패했습니다: {exc}"
-        ) from exc
-
-
-    # 학습 당시 사용한 피처 목록을 기준으로
-    # 새 입력 데이터의 스키마를 검증한다.
-    expected_columns = list(
-        pipeline.feature_names_in_
+    bundle = (
+        _load_model_bundle()
     )
 
-    missing_columns = [
-        column
-        for column in expected_columns
-        if column not in df.columns
-    ]
+    schema = (
+        bundle[
+            "input_schema"
+        ]
+    )
 
-    if missing_columns:
+    _validate_user_input(
+        user_input,
+        schema,
+    )
+
+    if (
+        feature
+        not in schema[
+            "feature_columns"
+        ]
+    ):
         raise ModelingError(
-            "예측에 필요한 입력 변수가 없습니다: "
-            f"{missing_columns}"
+            f"예측 모델에서 사용하지 않는 변수입니다: {feature}"
         )
 
-
-    # 입력 데이터에 불필요한 컬럼이 있더라도
-    # 학습 당시 사용한 피처만 정확한 순서로 선택한다.
-    X = (
-        df[expected_columns]
-        .copy()
-    )
-
-    categorical_columns = (
-        X
-        .select_dtypes(exclude="number")
-        .columns
-        .tolist()
-    )
-
-    X = _coerce_feature_dtypes(
-        X,
-        categorical_columns,
-    )
-
-    try:
-        prediction = pipeline.predict(X)
-        probability = pipeline.predict_proba(X)[:, 1]
-    except Exception as exc:
+    if points < 2:
         raise ModelingError(
-            f"추론에 실패했습니다 (입력 컬럼이 학습 시점과 다를 수 있습니다): {exc}"
-        ) from exc
+            "points는 2 이상이어야 합니다."
+        )
+
+    info = (
+        schema[
+            "features"
+        ][feature]
+    )
+
+    if values is None:
+        if (
+            info[
+                "type"
+            ]
+            == "continuous"
+        ):
+            lower = float(
+                info[
+                    "q05"
+                ]
+            )
+
+            upper = float(
+                info[
+                    "q95"
+                ]
+            )
+
+            if lower == upper:
+                lower = float(
+                    info[
+                        "minimum"
+                    ]
+                )
+
+                upper = float(
+                    info[
+                        "maximum"
+                    ]
+                )
+
+            if lower == upper:
+                scenario_values = [
+                    lower
+                ]
+            else:
+                scenario_values = (
+                    np.linspace(
+                        lower,
+                        upper,
+                        points,
+                    )
+                    .tolist()
+                )
+
+        else:
+            scenario_values = list(
+                info[
+                    "levels"
+                ]
+            )
+
+    else:
+        if not values:
+            raise ModelingError(
+                "What-if values가 비어 있습니다."
+            )
+
+        scenario_values = list(
+            values
+        )
+
+    scenarios: list[dict] = []
+
+    for value in scenario_values:
+        scenario = dict(
+            user_input
+        )
+
+        scenario[
+            feature
+        ] = value
+
+        scenarios.append(
+            scenario
+        )
+
+    scenario_df = pd.DataFrame(
+        scenarios
+    )
+
+    (
+        _,
+        probabilities,
+    ) = _predict_with_bundle(
+        scenario_df,
+        bundle,
+    )
 
     return pd.DataFrame(
-        {"prediction": prediction.astype(int), "probability": probability}, index=df.index
+        {
+            "feature": (
+                feature
+            ),
+            "value": (
+                scenario_values
+            ),
+            "high_income_probability": (
+                probabilities
+            ),
+            "high_income_probability_percent": (
+                probabilities
+                * 100
+            ),
+        }
     )

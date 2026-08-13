@@ -1,0 +1,197 @@
+{
+  "feature_columns": [
+    "age",
+    "workclass",
+    "education",
+    "marital-status",
+    "occupation",
+    "relationship",
+    "race",
+    "sex",
+    "capital-gain",
+    "capital-loss",
+    "hours-per-week",
+    "native-country"
+  ],
+  "features": {
+    "age": {
+      "type": "continuous",
+      "minimum": 17.0,
+      "maximum": 90.0,
+      "reference_value": 37.0,
+      "q05": 19.0,
+      "q95": 63.0
+    },
+    "workclass": {
+      "type": "categorical",
+      "levels": [
+        "Federal-gov",
+        "Local-gov",
+        "Never-worked",
+        "Private",
+        "Self-emp-inc",
+        "Self-emp-not-inc",
+        "State-gov",
+        "Without-pay"
+      ],
+      "reference_value": "Private"
+    },
+    "education": {
+      "type": "categorical",
+      "levels": [
+        "10th",
+        "11th",
+        "12th",
+        "1st-4th",
+        "5th-6th",
+        "7th-8th",
+        "9th",
+        "Assoc-acdm",
+        "Assoc-voc",
+        "Bachelors",
+        "Doctorate",
+        "HS-grad",
+        "Masters",
+        "Preschool",
+        "Prof-school",
+        "Some-college"
+      ],
+      "reference_value": "HS-grad"
+    },
+    "marital-status": {
+      "type": "categorical",
+      "levels": [
+        "Divorced",
+        "Married-AF-spouse",
+        "Married-civ-spouse",
+        "Married-spouse-absent",
+        "Never-married",
+        "Separated",
+        "Widowed"
+      ],
+      "reference_value": "Married-civ-spouse"
+    },
+    "occupation": {
+      "type": "categorical",
+      "levels": [
+        "Adm-clerical",
+        "Armed-Forces",
+        "Craft-repair",
+        "Exec-managerial",
+        "Farming-fishing",
+        "Handlers-cleaners",
+        "Machine-op-inspct",
+        "Other-service",
+        "Priv-house-serv",
+        "Prof-specialty",
+        "Protective-serv",
+        "Sales",
+        "Tech-support",
+        "Transport-moving"
+      ],
+      "reference_value": "Prof-specialty"
+    },
+    "relationship": {
+      "type": "categorical",
+      "levels": [
+        "Husband",
+        "Not-in-family",
+        "Other-relative",
+        "Own-child",
+        "Unmarried",
+        "Wife"
+      ],
+      "reference_value": "Husband"
+    },
+    "race": {
+      "type": "categorical",
+      "levels": [
+        "Amer-Indian-Eskimo",
+        "Asian-Pac-Islander",
+        "Black",
+        "Other",
+        "White"
+      ],
+      "reference_value": "White"
+    },
+    "sex": {
+      "type": "binary",
+      "levels": [
+        "Female",
+        "Male"
+      ],
+      "reference_value": "Male"
+    },
+    "capital-gain": {
+      "type": "continuous",
+      "minimum": 0.0,
+      "maximum": 99999.0,
+      "reference_value": 0.0,
+      "q05": 0.0,
+      "q95": 5013.0
+    },
+    "capital-loss": {
+      "type": "continuous",
+      "minimum": 0.0,
+      "maximum": 4356.0,
+      "reference_value": 0.0,
+      "q05": 0.0,
+      "q95": 0.0
+    },
+    "hours-per-week": {
+      "type": "continuous",
+      "minimum": 1.0,
+      "maximum": 99.0,
+      "reference_value": 40.0,
+      "q05": 17.0,
+      "q95": 60.0
+    },
+    "native-country": {
+      "type": "categorical",
+      "levels": [
+        "Cambodia",
+        "Canada",
+        "China",
+        "Columbia",
+        "Cuba",
+        "Dominican-Republic",
+        "Ecuador",
+        "El-Salvador",
+        "England",
+        "France",
+        "Germany",
+        "Greece",
+        "Guatemala",
+        "Haiti",
+        "Holand-Netherlands",
+        "Honduras",
+        "Hong",
+        "Hungary",
+        "India",
+        "Iran",
+        "Ireland",
+        "Italy",
+        "Jamaica",
+        "Japan",
+        "Laos",
+        "Mexico",
+        "Nicaragua",
+        "Outlying-US(Guam-USVI-etc)",
+        "Peru",
+        "Philippines",
+        "Poland",
+        "Portugal",
+        "Puerto-Rico",
+        "Scotland",
+        "South",
+        "Taiwan",
+        "Thailand",
+        "Trinadad&Tobago",
+        "United-States",
+        "Vietnam",
+        "Yugoslavia"
+      ],
+      "reference_value": "United-States"
+    }
+  }
+}

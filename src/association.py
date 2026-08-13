@@ -26,6 +26,7 @@
 
 from __future__ import annotations
 
+import statsmodels.api as sm
 from dataclasses import dataclass
 from typing import Literal
 
@@ -831,6 +832,68 @@ def _safe_exp(
         )
     )
 
+def _fit_standard_logit(
+    y: pd.Series,
+    X: pd.DataFrame,
+):
+    """일반 최대우도 Logistic Regression을 우선 시도한다."""
+
+    model = sm.Logit(
+        y,
+        X,
+    )
+
+    fitted = model.fit(
+        disp=False,
+        maxiter=300,
+    )
+
+    converged = bool(
+        fitted.mle_retvals.get(
+            "converged",
+            True,
+        )
+    )
+
+    if not converged:
+        raise AssociationError(
+            "standard_logit_not_converged"
+        )
+
+    return fitted
+
+def _fit_binomial_glm_fallback(
+    y: pd.Series,
+    X: pd.DataFrame,
+):
+    """Logit MLE가 불안정할 때 Binomial GLM으로 재시도한다."""
+
+    model = sm.GLM(
+        y,
+        X,
+        family=sm.families.Binomial(),
+    )
+
+    fitted = model.fit(
+        method="IRLS",
+        maxiter=500,
+        tol=1e-8,
+        wls_method="pinv",
+    )
+
+    if not bool(
+        getattr(
+            fitted,
+            "converged",
+            False,
+        )
+    ):
+        raise AssociationError(
+            "glm_binomial_not_converged"
+        )
+
+    return fitted
+
 def _fit_logistic_association(
     df: pd.DataFrame,
     request: AnalysisRequest,
@@ -878,37 +941,37 @@ def _fit_logistic_association(
             "제거한 뒤 다시 분석하세요."
         )
 
+    fit_method = (
+        "standard_logit"
+    )
+
     try:
-        model = sm.Logit(
-            y,
-            X,
+        fitted = (
+            _fit_standard_logit(
+                y,
+                X,
+            )
         )
 
-        fitted = model.fit(
-            disp=False,
-            maxiter=200,
+    except Exception:
+        fit_method = (
+            "binomial_glm_pinv"
         )
 
-    except PerfectSeparationError as exc:
-        raise AssociationError(
-            "일부 변수 조합이 고소득 여부를 완전히 분리하여 "
-            "Logistic Regression을 추정할 수 없습니다."
-        ) from exc
+        try:
+            fitted = (
+                _fit_binomial_glm_fallback(
+                    y,
+                    X,
+                )
+            )
 
-    except np.linalg.LinAlgError as exc:
-        raise AssociationError(
-            "Logistic Regression 행렬 계산에 실패했습니다. "
-            "중복되거나 지나치게 유사한 통제변수를 확인하세요."
-        ) from exc
-
-    except (
-        TypeError,
-        ValueError,
-    ) as exc:
-        raise AssociationError(
-            "Logistic Regression 적합에 실패했습니다: "
-            f"{exc}"
-        ) from exc
+        except Exception as exc:
+            raise AssociationError(
+                "선택한 변수 조합에서는 조정된 연관성을 "
+                "안정적으로 추정할 수 없습니다. "
+                "희소 범주 또는 변수 간 강한 중복이 원인일 수 있습니다."
+            ) from exc
 
     converged = bool(
         fitted.mle_retvals.get(
@@ -1098,6 +1161,9 @@ def _fit_logistic_association(
     return {
         "method": (
             "binary_logistic_regression"
+        ),
+        "fit_method": (
+            fit_method
         ),
         "adjustment_applied": bool(
             request.controls

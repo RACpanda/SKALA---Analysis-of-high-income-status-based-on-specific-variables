@@ -1036,8 +1036,8 @@ def association_page(
             VisualizationError,
             ValueError,
         ) as exc:
-            st.error(
-                str(exc)
+            display_association_error(
+                exc
             )
             return
 
@@ -1589,7 +1589,7 @@ def prediction_page() -> None:
                     width="stretch",
                 )
             )
-            
+
     if predict_button:
         try:
             with st.spinner(
@@ -1866,6 +1866,55 @@ def prediction_page() -> None:
 # ============================================================
 # 앱 실행
 # ============================================================
+
+def display_association_error(
+    exc: Exception,
+) -> None:
+    """연관성 분석 실패 원인을 사용자 친화적으로 안내한다."""
+
+    message = str(exc)
+
+    if (
+        "수렴하지 않았습니다"
+        in message
+        or "행렬 계산에 실패했습니다"
+        in message
+        or "선형 종속성"
+        in message
+        or "완전히 분리"
+        in message
+    ):
+        st.warning(
+            "현재 변수 조합에서는 조정된 연관성을 "
+            "안정적으로 계산하기 어렵습니다."
+        )
+
+        st.markdown(
+            """
+            **다음 방법 중 하나를 시도해 주세요.**
+
+            - 통제 변수를 1개 이상 줄여 보세요.
+            - 범주가 많은 통제 변수(예: 직업, 출신 국가)를 제외해 보세요.
+            - 다른 관심 변수 또는 통제 변수 조합을 선택해 보세요.
+
+            일부 범주의 표본이 매우 적거나 고소득 여부가 한쪽으로
+            치우치면 Logistic Regression의 Odds Ratio를 안정적으로
+            추정하지 못할 수 있습니다.
+            """
+        )
+
+        with st.expander(
+            "기술적 상세 정보"
+        ):
+            st.code(
+                message
+            )
+
+        return
+
+    st.error(
+        message
+    )
 
 def render_hero() -> None:
     """서비스의 상단 소개 영역을 표시한다."""

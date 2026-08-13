@@ -1,0 +1,94 @@
+{
+  "generated_at_utc": "2026-08-12T05:14:46+00:00",
+  "dataset": {
+    "rows": 32561,
+    "columns": 17,
+    "column_names": [
+      "age",
+      "workclass",
+      "fnlwgt",
+      "education",
+      "education-num",
+      "marital-status",
+      "occupation",
+      "relationship",
+      "race",
+      "sex",
+      "capital-gain",
+      "capital-loss",
+      "hours-per-week",
+      "native-country",
+      "income",
+      "high_income",
+      "college_degree"
+    ]
+  },
+  "data_quality_before_cleaning": {
+    "missing_cells": 4262,
+    "columns_with_missing_values": 3,
+    "duplicate_rows": 24
+  },
+  "target_distribution": {
+    "valid_income_count": 32561,
+    "missing_income_count": 0,
+    "high_income_count": 7841,
+    "high_income_rate": 0.2408095574460244,
+    "low_income_count": 24720
+  },
+  "college_degree_distribution": {
+    "valid_degree_count": 32561,
+    "missing_degree_count": 0,
+    "college_degree_count": 8067,
+    "college_degree_rate": 0.24775037621694665,
+    "no_college_degree_count": 24494
+  },
+  "unadjusted_association": {
+    "college_degree_high_income_rate": 0.4845667534399405,
+    "no_college_degree_high_income_rate": 0.16052910916959257,
+    "high_income_rate_difference": 0.3240376442703479,
+    "interpretation": "이 차이는 조정 전 단순 집단 비교이며, 대학 학위의 인과효과로 해석할 수 없다."
+  },
+  "top_education_by_high_income_rate": [
+    {
+      "education": "Doctorate",
+      "sample_size": 413,
+      "high_income_count": 306,
+      "high_income_rate": 0.7409200968523002,
+      "college_degree": 1,
+      "education_num": 16.0
+    },
+    {
+      "education": "Prof-school",
+      "sample_size": 576,
+      "high_income_count": 423,
+      "high_income_rate": 0.734375,
+      "college_degree": 1,
+      "education_num": 15.0
+    },
+    {
+      "education": "Masters",
+      "sample_size": 1723,
+      "high_income_count": 959,
+      "high_income_rate": 0.5565873476494486,
+      "college_degree": 1,
+      "education_num": 14.0
+    },
+    {
+      "education": "Bachelors",
+      "sample_size": 5355,
+      "high_income_count": 2221,
+      "high_income_rate": 0.4147525676937442,
+      "college_degree": 1,
+      "education_num": 13.0
+    },
+    {
+      "education": "Assoc-voc",
+      "sample_size": 1382,
+      "high_income_count": 361,
+      "high_income_rate": 0.26121562952243127,
+      "college_degree": 0,
+      "education_num": 11.0
+    }
+  ],
+  "analysis_note": "EDA는 관측된 분포와 조정 전 연관성을 요약한다. Welch t-test와 PSM 결과는 statistics.py에서 별도로 생성한다."
+}

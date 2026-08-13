@@ -1,0 +1,3 @@
+college_degree,college_group,sample_size,high_income_count,high_income_rate,mean_age,median_age,mean_hours_per_week,median_hours_per_week
+0,No college degree,24494,3932,0.16052910916959257,37.82754960398465,36.0,39.44798726218666,40.0
+1,College degree,8067,3909,0.4845667534399405,40.87132763108963,40.0,43.44179992562291,40.0

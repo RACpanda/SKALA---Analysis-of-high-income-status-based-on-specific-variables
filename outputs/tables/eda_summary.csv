@@ -1,0 +1,2 @@
+rows,columns,missing_cells,duplicate_rows,high_income_count,high_income_rate,college_degree_count,college_degree_rate,college_degree_high_income_rate,no_college_degree_high_income_rate,high_income_rate_difference
+32561,17,4262,24,7841,0.2408095574460244,8067,0.24775037621694665,0.4845667534399405,0.16052910916959257,0.3240376442703479

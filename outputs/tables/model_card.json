@@ -1,0 +1,59 @@
+{
+  "generated_at": "2026-08-12T05:14:52.933333+00:00",
+  "model_name": "hist_gradient_boosting",
+  "hyperparameters": {
+    "learning_rate": 0.14447746112718687,
+    "max_depth": 5,
+    "max_iter": 154,
+    "l2_regularization": 0.45606998421703593
+  },
+  "categorical_encoding": "native_from_dtype",
+  "random_state": 42,
+  "train_rows": 26029,
+  "test_rows": 6508,
+  "feature_columns": [
+    "age",
+    "workclass",
+    "education",
+    "marital-status",
+    "occupation",
+    "relationship",
+    "race",
+    "sex",
+    "capital-gain",
+    "capital-loss",
+    "hours-per-week",
+    "native-country",
+    "college_degree"
+  ],
+  "sklearn_version": "1.4.2",
+  "python_version": "3.11.15",
+  "selection_reference": "docs/MODEL_SELECTION_LOG.md",
+  "fairness_check": {
+    "status": "fail",
+    "min_recall_threshold": 0.6,
+    "max_recall_gap_threshold": 0.1,
+    "violations": [
+      {
+        "group_column": "race",
+        "type": "recall_gap",
+        "value": 0.11556327607283012,
+        "threshold": 0.1,
+        "lowest_group_value": "Asian-Pac-Islander",
+        "lowest_group_recall": 0.7818181818181819,
+        "highest_group_value": "White",
+        "highest_group_recall": 0.897381457891012
+      },
+      {
+        "group_column": "sex",
+        "type": "recall_gap",
+        "value": 0.10019894773427296,
+        "threshold": 0.1,
+        "lowest_group_value": "Female",
+        "lowest_group_recall": 0.8031496062992126,
+        "highest_group_value": "Male",
+        "highest_group_recall": 0.9033485540334856
+      }
+    ]
+  }
+}

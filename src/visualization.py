@@ -642,6 +642,146 @@ def plot_adjusted_association(
 
     return figure
 
+def plot_adjusted_probability(
+    result: dict,
+) -> go.Figure:
+    """관심 변수 값별 조정된 평균 고소득 확률을 표시한다."""
+
+    _validate_association_result(
+        result
+    )
+
+    request = result[
+        "request"
+    ]
+
+    analysis = result[
+        "analysis"
+    ]
+
+    exposure = request[
+        "exposure"
+    ]
+
+    exposure_type = analysis[
+        "exposure_type"
+    ]
+
+    adjusted = analysis[
+        "adjusted"
+    ]
+
+    probability_result = (
+        adjusted.get(
+            "adjusted_probabilities"
+        )
+    )
+
+    if not isinstance(
+        probability_result,
+        dict,
+    ):
+        raise VisualizationError(
+            "조정 확률 결과가 없습니다."
+        )
+
+    records = probability_result.get(
+        "records",
+        []
+    )
+
+    if not records:
+        raise VisualizationError(
+            "시각화할 조정 확률이 없습니다."
+        )
+
+    chart_data = pd.DataFrame(
+        records
+    )
+
+    chart_data[
+        "adjusted_probability_percent"
+    ] = (
+        chart_data[
+            "adjusted_probability"
+        ]
+        * 100
+    )
+
+    if exposure_type == "continuous":
+        chart_data[
+            "exposure_value"
+        ] = pd.to_numeric(
+            chart_data[
+                "exposure_value"
+            ],
+            errors="raise",
+        )
+
+        chart_data = (
+            chart_data
+            .sort_values(
+                "exposure_value"
+            )
+        )
+
+        figure = px.line(
+            chart_data,
+            x="exposure_value",
+            y=(
+                "adjusted_probability_percent"
+            ),
+            markers=True,
+            title=(
+                f"{exposure}의 조정 고소득 확률"
+            ),
+            labels={
+                "exposure_value": (
+                    exposure
+                ),
+                "adjusted_probability_percent": (
+                    "조정 고소득 확률 (%)"
+                ),
+            },
+        )
+
+    else:
+        figure = px.bar(
+            chart_data,
+            x="exposure_value",
+            y=(
+                "adjusted_probability_percent"
+            ),
+            title=(
+                f"{exposure}별 조정 고소득 확률"
+            ),
+            labels={
+                "exposure_value": (
+                    exposure
+                ),
+                "adjusted_probability_percent": (
+                    "조정 고소득 확률 (%)"
+                ),
+            },
+        )
+
+    figure.update_yaxes(
+        range=[
+            0,
+            100,
+        ]
+    )
+
+    figure.update_traces(
+        hovertemplate=(
+            f"{exposure}: %{{x}}"
+            "<br>조정 고소득 확률: "
+            "%{y:.2f}%"
+            "<extra></extra>"
+        )
+    )
+
+    return figure
 
 # ============================================================
 # PSM 균형 시각화
@@ -898,6 +1038,11 @@ def create_association_visualizations(
         ),
         "adjusted": (
             plot_adjusted_association(
+                result
+            )
+        ),
+        "adjusted_probability": (
+            plot_adjusted_probability(
                 result
             )
         ),

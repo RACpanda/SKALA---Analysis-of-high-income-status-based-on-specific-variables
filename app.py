@@ -600,6 +600,74 @@ def display_adjusted_result(
         ]
     )
 
+    overall_test = adjusted.get(
+        "overall_test"
+    )
+
+    if (
+        isinstance(
+            overall_test,
+            dict,
+        )
+    ):
+        st.markdown(
+            "##### 관심 변수 전체 효과"
+        )
+
+        if overall_test.get(
+            "estimable",
+            False,
+        ):
+            col1, col2, col3 = (
+                st.columns(3)
+            )
+
+            with col1:
+                st.metric(
+                    "Wald χ²",
+                    (
+                        f"{overall_test['statistic']:.3f}"
+                    ),
+                )
+
+            with col2:
+                st.metric(
+                    "자유도",
+                    overall_test[
+                        "degrees_of_freedom"
+                    ],
+                )
+
+            with col3:
+                st.metric(
+                    "Overall p-value",
+                    _format_p_value(
+                        overall_test[
+                            "p_value"
+                        ]
+                    ),
+                )
+
+            st.caption(
+                "범주형 관심 변수의 모든 범주 효과를 "
+                "동시에 검정한 결과입니다. "
+                "귀무가설은 기준 범주 대비 모든 범주의 "
+                "회귀계수가 동시에 0이라는 것입니다."
+            )
+
+        else:
+            st.warning(
+                overall_test.get(
+                    "warning",
+                    (
+                        "관심 변수 전체 효과를 "
+                        "검정하지 못했습니다."
+                    ),
+                )
+            )
+
+        st.write("")
+
     rows: list[dict] = []
 
     for effect in effects:
@@ -1001,6 +1069,7 @@ def association_page(
             else:
                 st.caption(
                     "범주별 고소득률을 비교한 뒤 "
+                    "관심 변수 전체의 조정 후 연관성을 검정하고, "
                     "각 범주와 기준 범주의 Adjusted Odds Ratio를 확인합니다."
                 )
     if analyze_button:
@@ -1088,28 +1157,10 @@ def association_page(
     else:
         st.caption(
             "조정 전: 범주별 고소득률 + Chi-square · "
-            "조정 후: Adjusted Odds Ratio"
+            "조정 후: Overall Wald Test + Adjusted Odds Ratio"
         )
 
     st.divider()
-
-    st.markdown(
-        '<div class="section-number">01 · UNADJUSTED</div>',
-        unsafe_allow_html=True,
-    )
-
-    st.subheader(
-        "조정 전 연관성"
-    )
-    
-    st.markdown(
-        '<div class="section-number">02 · ADJUSTED</div>',
-        unsafe_allow_html=True,
-    )
-
-    st.subheader(
-        "통제 변수 조정 후"
-    )
 
     col1, col2, col3 = st.columns(
         3
@@ -1163,8 +1214,15 @@ def association_page(
     # 조정 전
     # --------------------------------------------------------
 
+    st.markdown(
+        '<div class="section-number">'
+        '01 · UNADJUSTED'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
     st.subheader(
-        "1. 조정 전 연관성"
+        "조정 전 연관성"
     )
 
     display_unadjusted_result(
@@ -1182,8 +1240,15 @@ def association_page(
     # 조정 후
     # --------------------------------------------------------
 
+    st.markdown(
+        '<div class="section-number">'
+        '02 · ADJUSTED'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
     st.subheader(
-        "2. 통제 변수 조정 후 연관성"
+        "통제 변수 조정 후 연관성"
     )
 
     display_adjusted_result(
@@ -1197,6 +1262,33 @@ def association_page(
         width="stretch",
     )
 
+    st.markdown(
+        '<div class="section-number">'
+        '03 · ADJUSTED PROBABILITY'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.subheader(
+        "조정 고소득 확률"
+    )
+
+    st.caption(
+        "통제 변수의 실제 관측값은 유지한 채 "
+        "관심 변수의 값만 동일하게 설정하여 계산한 "
+        "평균 모형 예측확률입니다."
+    )
+
+    if (
+        "adjusted_probability"
+        in figures
+    ):
+        st.plotly_chart(
+            figures[
+                "adjusted_probability"
+            ],
+            width="stretch",
+        )
     if not request_result[
         "controls"
     ]:
@@ -1214,8 +1306,15 @@ def association_page(
     )
 
     if psm is not None:
+        st.markdown(
+            '<div class="section-number">'
+            '04 · PROPENSITY SCORE MATCHING'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
         st.subheader(
-            "3. 성향점수매칭(PSM)"
+            "4. 성향점수매칭(PSM)"
         )
 
         display_psm_result(

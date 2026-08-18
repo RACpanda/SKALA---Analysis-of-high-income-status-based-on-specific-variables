@@ -1059,6 +1059,500 @@ def _model_bic(
 
     return value
 
+def _mean_predicted_probability(
+    fitted,
+    X: pd.DataFrame,
+    overrides: dict[str, float],
+) -> float:
+    """일부 관심 변수 값을 변경한 뒤 평균 예측확률을 계산한다."""
+
+    scenario = X.copy()
+
+    for column, value in overrides.items():
+        if column not in scenario.columns:
+            raise AssociationError(
+                "조정 확률 계산에 필요한 "
+                f"회귀항이 없습니다: {column}"
+            )
+
+        scenario[column] = float(
+            value
+        )
+
+    probabilities = np.asarray(
+        fitted.predict(
+            scenario
+        ),
+        dtype=float,
+    ).reshape(-1)
+
+    if (
+        len(probabilities)
+        != len(scenario)
+    ):
+        raise AssociationError(
+            "조정 확률 계산 결과의 "
+            "표본 수가 일치하지 않습니다."
+        )
+
+    if not np.all(
+        np.isfinite(
+            probabilities
+        )
+    ):
+        raise AssociationError(
+            "조정 확률에 유효하지 않은 값이 "
+            "포함되어 있습니다."
+        )
+
+    if np.any(
+        (
+            probabilities < 0
+        )
+        |
+        (
+            probabilities > 1
+        )
+    ):
+        raise AssociationError(
+            "조정 확률이 0과 1의 범위를 "
+            "벗어났습니다."
+        )
+
+    return float(
+        probabilities.mean()
+    )
+
+
+def _adjusted_probability_summary(
+    fitted,
+    X: pd.DataFrame,
+    df: pd.DataFrame,
+    request: AnalysisRequest,
+    exposure_type: VariableType,
+    exposure_terms: list[str],
+    exposure_metadata: dict,
+) -> dict:
+    """관심 변수 값별 평균 조정 고소득 확률을 계산한다."""
+
+    exposure = (
+        request.exposure
+    )
+
+    records: list[dict] = []
+
+    # --------------------------------------------------------
+    # 이진 관심 변수
+    # --------------------------------------------------------
+    if exposure_type == "binary":
+        reference = (
+            exposure_metadata[
+                "reference_level"
+            ]
+        )
+
+        comparison = (
+            exposure_metadata[
+                "comparison_level"
+            ]
+        )
+
+        for (
+            level,
+            encoded_value,
+        ) in [
+            (
+                reference,
+                0.0,
+            ),
+            (
+                comparison,
+                1.0,
+            ),
+        ]:
+            probability = (
+                _mean_predicted_probability(
+                    fitted,
+                    X,
+                    {
+                        exposure: (
+                            encoded_value
+                        )
+                    },
+                )
+            )
+
+            records.append(
+                {
+                    "exposure_value": (
+                        level
+                    ),
+                    "adjusted_probability": (
+                        probability
+                    ),
+                }
+            )
+
+    # --------------------------------------------------------
+    # 다범주형 관심 변수
+    # --------------------------------------------------------
+    elif exposure_type == "categorical":
+        levels = list(
+            exposure_metadata[
+                "levels"
+            ]
+        )
+
+        reference = (
+            exposure_metadata[
+                "reference_level"
+            ]
+        )
+
+        # 모든 exposure dummy를 0으로 만들면
+        # 기준 범주가 된다.
+        base_overrides = {
+            term: 0.0
+            for term in exposure_terms
+        }
+
+        reference_probability = (
+            _mean_predicted_probability(
+                fitted,
+                X,
+                base_overrides,
+            )
+        )
+
+        records.append(
+            {
+                "exposure_value": (
+                    reference
+                ),
+                "adjusted_probability": (
+                    reference_probability
+                ),
+            }
+        )
+
+        for level in levels[1:]:
+            term = (
+                f"{exposure}_{level}"
+            )
+
+            if term not in exposure_terms:
+                raise AssociationError(
+                    "범주형 관심 변수의 "
+                    f"회귀항을 찾을 수 없습니다: {level}"
+                )
+
+            overrides = dict(
+                base_overrides
+            )
+
+            overrides[
+                term
+            ] = 1.0
+
+            probability = (
+                _mean_predicted_probability(
+                    fitted,
+                    X,
+                    overrides,
+                )
+            )
+
+            records.append(
+                {
+                    "exposure_value": (
+                        level
+                    ),
+                    "adjusted_probability": (
+                        probability
+                    ),
+                }
+            )
+
+    # --------------------------------------------------------
+    # 연속형 관심 변수
+    # --------------------------------------------------------
+    else:
+        exposure_values = (
+            pd.to_numeric(
+                df[
+                    exposure
+                ],
+                errors="raise",
+            )
+            .astype(float)
+        )
+
+        quantiles = (
+            exposure_values.quantile(
+                [
+                    0.05,
+                    0.25,
+                    0.50,
+                    0.75,
+                    0.95,
+                ]
+            )
+            .to_numpy(
+                dtype=float
+            )
+        )
+
+        representative_values: list[
+            float
+        ] = []
+
+        for value in quantiles:
+            value = float(
+                value
+            )
+
+            if not any(
+                np.isclose(
+                    value,
+                    existing,
+                )
+                for existing
+                in representative_values
+            ):
+                representative_values.append(
+                    value
+                )
+
+        # capital-gain처럼 대부분 값이 0인 경우
+        # 분위수들이 모두 같은 값이 될 수 있다.
+        if (
+            len(
+                representative_values
+            )
+            < 2
+        ):
+            minimum = float(
+                exposure_values.min()
+            )
+
+            maximum = float(
+                exposure_values.max()
+            )
+
+            representative_values = [
+                minimum
+            ]
+
+            if not np.isclose(
+                minimum,
+                maximum,
+            ):
+                representative_values.append(
+                    maximum
+                )
+
+        for value in representative_values:
+            probability = (
+                _mean_predicted_probability(
+                    fitted,
+                    X,
+                    {
+                        exposure: value
+                    },
+                )
+            )
+
+            records.append(
+                {
+                    "exposure_value": (
+                        value
+                    ),
+                    "adjusted_probability": (
+                        probability
+                    ),
+                }
+            )
+
+    return {
+        "method": (
+            "average_marginal_prediction"
+        ),
+        "adjustment_applied": bool(
+            request.controls
+        ),
+        "records": (
+            records
+        ),
+        "interpretation": (
+            "각 관심 변수 값에 대해 통제 변수의 실제 관측값은 "
+            "유지한 채 관심 변수만 동일하게 설정하여 계산한 "
+            "평균 모형 예측확률입니다."
+        ),
+    }
+
+def _categorical_overall_wald_test(
+    fitted,
+    exposure_terms: list[str],
+) -> dict:
+    """범주형 관심 변수의 모든 더미계수가 동시에 0인지 검정한다."""
+
+    if not exposure_terms:
+        return {
+            "method": (
+                "joint_wald_test"
+            ),
+            "estimable": False,
+            "statistic": None,
+            "degrees_of_freedom": None,
+            "p_value": None,
+            "warning": (
+                "전체 효과를 검정할 관심 변수 회귀항이 없습니다."
+            ),
+        }
+
+    parameter_names = list(
+        fitted.params.index
+    )
+
+    missing_terms = [
+        term
+        for term in exposure_terms
+        if term not in parameter_names
+    ]
+
+    if missing_terms:
+        return {
+            "method": (
+                "joint_wald_test"
+            ),
+            "estimable": False,
+            "statistic": None,
+            "degrees_of_freedom": None,
+            "p_value": None,
+            "warning": (
+                "일부 관심 변수 회귀항을 찾을 수 없어 "
+                "전체 효과를 검정하지 못했습니다."
+            ),
+        }
+
+    restriction = np.zeros(
+        (
+            len(
+                exposure_terms
+            ),
+            len(
+                parameter_names
+            ),
+        ),
+        dtype=float,
+    )
+
+    for row_index, term in enumerate(
+        exposure_terms
+    ):
+        column_index = (
+            parameter_names.index(
+                term
+            )
+        )
+
+        restriction[
+            row_index,
+            column_index,
+        ] = 1.0
+
+    try:
+        test = fitted.wald_test(
+            restriction,
+            use_f=False,
+            scalar=True,
+        )
+
+        statistic = float(
+            np.asarray(
+                test.statistic
+            ).squeeze()
+        )
+
+        p_value = float(
+            np.asarray(
+                test.pvalue
+            ).squeeze()
+        )
+
+    except (
+        ValueError,
+        np.linalg.LinAlgError,
+        FloatingPointError,
+    ):
+        return {
+            "method": (
+                "joint_wald_test"
+            ),
+            "estimable": False,
+            "statistic": None,
+            "degrees_of_freedom": (
+                len(
+                    exposure_terms
+                )
+            ),
+            "p_value": None,
+            "warning": (
+                "공분산 행렬이 불안정하여 "
+                "범주형 관심 변수의 전체 효과를 "
+                "검정하지 못했습니다."
+            ),
+        }
+
+    if (
+        not np.isfinite(
+            statistic
+        )
+        or not np.isfinite(
+            p_value
+        )
+    ):
+        return {
+            "method": (
+                "joint_wald_test"
+            ),
+            "estimable": False,
+            "statistic": None,
+            "degrees_of_freedom": (
+                len(
+                    exposure_terms
+                )
+            ),
+            "p_value": None,
+            "warning": (
+                "범주형 관심 변수의 전체 효과 검정값을 "
+                "안정적으로 계산하지 못했습니다."
+            ),
+        }
+
+    return {
+        "method": (
+            "joint_wald_test"
+        ),
+        "estimable": True,
+        "statistic": (
+            statistic
+        ),
+        "degrees_of_freedom": (
+            len(
+                exposure_terms
+            )
+        ),
+        "p_value": (
+            p_value
+        ),
+        "warning": None,
+        "null_hypothesis": (
+            "범주형 관심 변수의 모든 비기준 범주 "
+            "회귀계수는 동시에 0이다."
+        ),
+    }
+
 def _fit_logistic_association(
     df: pd.DataFrame,
     request: AnalysisRequest,
@@ -1283,6 +1777,33 @@ def _fit_logistic_association(
     ):
         aic = None
 
+    adjusted_probabilities = (
+        _adjusted_probability_summary(
+            fitted=fitted,
+            X=X,
+            df=df,
+            request=request,
+            exposure_type=(
+                exposure_type
+            ),
+            exposure_terms=(
+                exposure_terms
+            ),
+            exposure_metadata=(
+                exposure_metadata
+            ),
+        )
+    )
+
+    overall_test = None
+
+    if exposure_type == "categorical":
+        overall_test = (
+            _categorical_overall_wald_test(
+                fitted,
+                exposure_terms,
+            )
+        )
 
     return {
         "method": (
@@ -1293,6 +1814,9 @@ def _fit_logistic_association(
         ),
         "fit_warnings": (
             fit_warnings
+        ),
+        "adjusted_probabilities": (
+            adjusted_probabilities
         ),
         "adjustment_applied": bool(
             request.controls
@@ -1308,6 +1832,9 @@ def _fit_logistic_association(
         ),
         "estimation_warnings": (
             estimation_warnings
+        ),
+        "overall_test": (
+            overall_test
         ),
         "model_diagnostics": {
             "converged": (

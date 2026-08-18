@@ -26,7 +26,7 @@
 
 from __future__ import annotations
 
-import statsmodels.api as sm
+import warnings
 from dataclasses import dataclass
 from typing import Literal
 
@@ -38,7 +38,9 @@ from scipy.stats import (
     pointbiserialr,
 )
 from statsmodels.tools.sm_exceptions import (
+    ConvergenceWarning,
     PerfectSeparationError,
+    PerfectSeparationWarning,
 )
 
 from src.config import (
@@ -843,30 +845,70 @@ def _fit_standard_logit(
         X,
     )
 
-    fitted = model.fit(
-        disp=False,
-        maxiter=300,
-    )
+    try:
+        with warnings.catch_warnings(
+            record=True
+        ) as caught_warnings:
+            warnings.simplefilter(
+                "always",
+                ConvergenceWarning,
+            )
+            warnings.simplefilter(
+                "always",
+                PerfectSeparationWarning,
+            )
+
+            fitted = model.fit(
+                disp=False,
+                maxiter=300,
+            )
+
+    except (
+        PerfectSeparationError,
+        np.linalg.LinAlgError,
+    ) as exc:
+        raise AssociationError(
+            "standard_logit_failed"
+        ) from exc
 
     converged = bool(
-        fitted.mle_retvals.get(
+        getattr(
+            fitted,
+            "mle_retvals",
+            {},
+        ).get(
             "converged",
-            True,
+            False,
         )
     )
 
-    if not converged:
+    unstable_warning = any(
+        issubclass(
+            warning.category,
+            (
+                ConvergenceWarning,
+                PerfectSeparationWarning,
+            ),
+        )
+        for warning in caught_warnings
+    )
+
+    if (
+        not converged
+        or unstable_warning
+    ):
         raise AssociationError(
-            "standard_logit_not_converged"
+            "standard_logit_unstable"
         )
 
     return fitted
+
 
 def _fit_binomial_glm_fallback(
     y: pd.Series,
     X: pd.DataFrame,
 ):
-    """Logit MLE가 불안정할 때 Binomial GLM으로 재시도한다."""
+    """일반 Logit이 불안정할 때 Binomial GLM으로 재시도한다."""
 
     model = sm.GLM(
         y,
@@ -874,25 +916,148 @@ def _fit_binomial_glm_fallback(
         family=sm.families.Binomial(),
     )
 
-    fitted = model.fit(
-        method="IRLS",
-        maxiter=500,
-        tol=1e-8,
-        wls_method="pinv",
-    )
+    try:
+        with warnings.catch_warnings(
+            record=True
+        ) as caught_warnings:
+            warnings.simplefilter(
+                "always",
+                PerfectSeparationWarning,
+            )
 
-    if not bool(
+            fitted = model.fit(
+                method="IRLS",
+                maxiter=500,
+                tol=1e-8,
+                wls_method="pinv",
+            )
+
+    except (
+        PerfectSeparationError,
+        np.linalg.LinAlgError,
+        ValueError,
+    ) as exc:
+        raise AssociationError(
+            "glm_binomial_failed"
+        ) from exc
+
+    converged = bool(
         getattr(
             fitted,
             "converged",
             False,
         )
+    )
+
+    separation_warning = any(
+        issubclass(
+            warning.category,
+            PerfectSeparationWarning,
+        )
+        for warning in caught_warnings
+    )
+
+    if (
+        not converged
+        or separation_warning
     ):
         raise AssociationError(
-            "glm_binomial_not_converged"
+            "glm_binomial_unstable"
         )
 
     return fitted
+
+
+def _model_converged(
+    fitted,
+    fit_method: str,
+) -> bool:
+    """적합 방법에 맞는 수렴 상태를 반환한다."""
+
+    if fit_method == "standard_logit":
+        return bool(
+            getattr(
+                fitted,
+                "mle_retvals",
+                {},
+            ).get(
+                "converged",
+                False,
+            )
+        )
+
+    return bool(
+        getattr(
+            fitted,
+            "converged",
+            False,
+        )
+    )
+
+
+def _model_pseudo_r_squared(
+    fitted,
+    fit_method: str,
+) -> float | None:
+    """Logit과 GLM에서 McFadden pseudo R²를 반환한다."""
+
+    try:
+        if fit_method == "standard_logit":
+            value = float(
+                fitted.prsquared
+            )
+        else:
+            value = float(
+                fitted.pseudo_rsquared(
+                    kind="mcf",
+                )
+            )
+
+    except (
+        AttributeError,
+        TypeError,
+        ValueError,
+        ZeroDivisionError,
+    ):
+        return None
+
+    if not np.isfinite(
+        value
+    ):
+        return None
+
+    return value
+
+
+def _model_bic(
+    fitted,
+    fit_method: str,
+) -> float | None:
+    """적합 방법에 맞는 likelihood 기반 BIC를 반환한다."""
+
+    try:
+        if fit_method == "standard_logit":
+            value = float(
+                fitted.bic
+            )
+        else:
+            value = float(
+                fitted.bic_llf
+            )
+
+    except (
+        AttributeError,
+        TypeError,
+        ValueError,
+    ):
+        return None
+
+    if not np.isfinite(
+        value
+    ):
+        return None
+
+    return value
 
 def _fit_logistic_association(
     df: pd.DataFrame,
@@ -941,21 +1106,23 @@ def _fit_logistic_association(
             "제거한 뒤 다시 분석하세요."
         )
 
-    fit_method = (
-        "standard_logit"
-    )
+    fit_method = "standard_logit"
+    fit_warnings: list[str] = []
 
     try:
-        fitted = (
-            _fit_standard_logit(
-                y,
-                X,
-            )
+        fitted = _fit_standard_logit(
+            y,
+            X,
         )
 
-    except Exception:
+    except AssociationError:
         fit_method = (
             "binomial_glm_pinv"
+        )
+
+        fit_warnings.append(
+            "일반 Logistic Regression이 안정적으로 적합되지 않아 "
+            "Binomial GLM(IRLS, pinv)으로 다시 추정했습니다."
         )
 
         try:
@@ -966,33 +1133,34 @@ def _fit_logistic_association(
                 )
             )
 
-        except Exception as exc:
+        except AssociationError as exc:
             raise AssociationError(
                 "선택한 변수 조합에서는 조정된 연관성을 "
                 "안정적으로 추정할 수 없습니다. "
-                "희소 범주 또는 변수 간 강한 중복이 원인일 수 있습니다."
+                "희소 범주, 완전분리 또는 강한 변수 중복이 "
+                "원인일 수 있습니다."
             ) from exc
 
-    converged = bool(
-        fitted.mle_retvals.get(
-            "converged",
-            True,
-        )
+
+    converged = _model_converged(
+        fitted,
+        fit_method,
     )
 
     if not converged:
         raise AssociationError(
-            "Logistic Regression이 수렴하지 않았습니다. "
+            "조정 모형이 수렴하지 않았습니다. "
             "변수 조합이나 희소한 범주를 확인하세요."
         )
+
 
     confidence_interval = (
         fitted.conf_int(
             alpha=0.05
         )
     )
-
     exposure_results: list[dict] = []
+    estimation_warnings: list[str] = []
 
     for term in exposure_terms:
         coefficient = float(
@@ -1015,148 +1183,106 @@ def _fit_logistic_association(
             ]
         )
 
-        exposure_results: list[dict] = []
-        estimation_warnings: list[str] = []
+        p_value = float(
+            fitted.pvalues[
+                term
+            ]
+        )
 
-        for term in exposure_terms:
-            coefficient = float(
-                fitted.params[
-                    term
-                ]
+        odds_ratio = _safe_exp(
+            coefficient
+        )
+
+        ci_low = _safe_exp(
+            ci_low_log
+        )
+
+        ci_high = _safe_exp(
+            ci_high_log
+        )
+
+        estimable = (
+            odds_ratio is not None
+            and ci_low is not None
+            and ci_high is not None
+            and np.isfinite(
+                p_value
+            )
+        )
+
+        if not estimable:
+            warning_message = (
+                f"'{term}' 범주는 완전분리 또는 준완전분리의 "
+                "영향으로 Odds Ratio와 신뢰구간을 "
+                "안정적으로 추정하지 못했습니다."
             )
 
-            ci_low_log = float(
-                confidence_interval.loc[
-                    term,
-                    0,
-                ]
+            estimation_warnings.append(
+                warning_message
             )
-
-            ci_high_log = float(
-                confidence_interval.loc[
-                    term,
-                    1,
-                ]
-            )
-
-            p_value = float(
-                fitted.pvalues[
-                    term
-                ]
-            )
-
-            odds_ratio = (
-                _safe_exp(
-                    coefficient
-                )
-            )
-
-            ci_low = (
-                _safe_exp(
-                    ci_low_log
-                )
-            )
-
-            ci_high = (
-                _safe_exp(
-                    ci_high_log
-                )
-            )
-
-            estimable = (
-                odds_ratio is not None
-                and ci_low is not None
-                and ci_high is not None
-                and np.isfinite(
-                    p_value
-                )
-            )
-
-            if not estimable:
-                warning_message = (
-                    f"'{term}' 범주는 완전분리 또는 준완전분리의 "
-                    "영향으로 Odds Ratio와 신뢰구간을 "
-                    "안정적으로 추정하지 못했습니다."
-                )
-
-                estimation_warnings.append(
-                    warning_message
-                )
-
-                exposure_results.append(
-                    {
-                        "term": term,
-                        "coefficient": (
-                            coefficient
-                            if np.isfinite(
-                                coefficient
-                            )
-                            else None
-                        ),
-                        "odds_ratio": None,
-                        "p_value": (
-                            p_value
-                            if np.isfinite(
-                                p_value
-                            )
-                            else None
-                        ),
-                        "ci_95_low": None,
-                        "ci_95_high": None,
-                        "estimable": False,
-                        "warning": (
-                            warning_message
-                        ),
-                    }
-                )
-
-                continue
 
             exposure_results.append(
                 {
                     "term": term,
                     "coefficient": (
                         coefficient
+                        if np.isfinite(
+                            coefficient
+                        )
+                        else None
                     ),
-                    "odds_ratio": (
-                        odds_ratio
-                    ),
+                    "odds_ratio": None,
                     "p_value": (
                         p_value
+                        if np.isfinite(
+                            p_value
+                        )
+                        else None
                     ),
-                    "ci_95_low": (
-                        ci_low
-                    ),
-                    "ci_95_high": (
-                        ci_high
-                    ),
-                    "estimable": True,
-                    "warning": None,
+                    "ci_95_low": None,
+                    "ci_95_high": None,
+                    "estimable": False,
+                    "warning": warning_message,
                 }
             )
+
+            continue
 
         exposure_results.append(
             {
                 "term": term,
-                "coefficient": (
-                    coefficient
-                ),
-                "odds_ratio": (
-                    odds_ratio
-                ),
-                "p_value": float(
-                    fitted.pvalues[
-                        term
-                    ]
-                ),
-                "ci_95_low": (
-                    ci_low
-                ),
-                "ci_95_high": (
-                    ci_high
-                ),
+                "coefficient": coefficient,
+                "odds_ratio": odds_ratio,
+                "p_value": p_value,
+                "ci_95_low": ci_low,
+                "ci_95_high": ci_high,
+                "estimable": True,
+                "warning": None,
             }
         )
+
+
+    pseudo_r_squared = (
+        _model_pseudo_r_squared(
+            fitted,
+            fit_method,
+        )
+    )
+
+    bic = _model_bic(
+        fitted,
+        fit_method,
+    )
+
+    aic = float(
+        fitted.aic
+    )
+
+    if not np.isfinite(
+        aic
+    ):
+        aic = None
+
 
     return {
         "method": (
@@ -1164,6 +1290,9 @@ def _fit_logistic_association(
         ),
         "fit_method": (
             fit_method
+        ),
+        "fit_warnings": (
+            fit_warnings
         ),
         "adjustment_applied": bool(
             request.controls
@@ -1187,14 +1316,14 @@ def _fit_logistic_association(
             "n_observations": int(
                 fitted.nobs
             ),
-            "pseudo_r_squared": float(
-                fitted.prsquared
+            "pseudo_r_squared": (
+                pseudo_r_squared
             ),
-            "aic": float(
-                fitted.aic
+            "aic": (
+                aic
             ),
-            "bic": float(
-                fitted.bic
+            "bic": (
+                bic
             ),
         },
     }

@@ -1,0 +1,62 @@
+{
+  "version": "1.2",
+  "experiment": "classification_threshold",
+  "probability_source": "sigmoid_calibrated_oof",
+  "evaluation_rows": 26029,
+  "default_threshold": {
+    "threshold": 0.5,
+    "accuracy": 0.8713742364285989,
+    "precision": 0.778116079923882,
+    "recall": 0.6520491149736884,
+    "specificity": 0.9409859297499747,
+    "balanced_accuracy": 0.7965175223618316,
+    "f1": 0.7095262883914628,
+    "tn": 18592.0,
+    "fp": 1166.0,
+    "fn": 2182.0,
+    "tp": 4089.0,
+    "predicted_positive_rate": 0.20189019939298475
+  },
+  "best_f1": {
+    "threshold": 0.39,
+    "accuracy": 0.8623842637058665,
+    "precision": 0.696363370819337,
+    "recall": 0.7603253069685856,
+    "specificity": 0.8947767992711813,
+    "balanced_accuracy": 0.8275510531198834,
+    "f1": 0.7269400823296234,
+    "tn": 17679.0,
+    "fp": 2079.0,
+    "fn": 1503.0,
+    "tp": 4768.0,
+    "predicted_positive_rate": 0.26305274885704405
+  },
+  "best_balanced_accuracy": {
+    "threshold": 0.24,
+    "accuracy": 0.8248107879672673,
+    "precision": 0.5921974350684341,
+    "recall": 0.8762557805772604,
+    "specificity": 0.8084826399433142,
+    "balanced_accuracy": 0.8423692102602873,
+    "f1": 0.7067524115755627,
+    "tn": 15974.0,
+    "fp": 3784.0,
+    "fn": 776.0,
+    "tp": 5495.0,
+    "predicted_positive_rate": 0.3564869952745015
+  },
+  "closest_precision_recall": {
+    "threshold": 0.43,
+    "accuracy": 0.8683007414806562,
+    "precision": 0.7287944632222759,
+    "recall": 0.7220538988996971,
+    "specificity": 0.9147180888753923,
+    "balanced_accuracy": 0.8183859938875446,
+    "f1": 0.7254085229093239,
+    "tn": 18073.0,
+    "fp": 1685.0,
+    "fn": 1743.0,
+    "tp": 4528.0,
+    "predicted_positive_rate": 0.23869530139459832
+  }
+}

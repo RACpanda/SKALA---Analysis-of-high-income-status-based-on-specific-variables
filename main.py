@@ -32,9 +32,7 @@ from src.config import (
 from src.data import load_and_clean
 from src.eda import run_eda
 from src.modeling import train_income_model
-from src.model_visualization import (
-    create_model_visualizations,
-)
+from src.model_visualization import (create_model_visualizations,)
 
 
 # ============================================================
@@ -75,7 +73,6 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-
     ensure_directories()
 
     # --------------------------------------------------------
@@ -86,27 +83,12 @@ def main() -> None:
         "all",
         "eda",
     }:
-        eda_result = run_eda(
-            data_path=args.data,
-        )
+        eda_result = run_eda(data_path=args.data,)
+        summary = (eda_result["summary"])
 
-        summary = (
-            eda_result[
-                "summary"
-            ]
-        )
-
-        print(
-            "\n[EDA]"
-        )
-
-        print(
-            f"rows: {summary['rows']}"
-        )
-
-        print(
-            f"columns: {summary['columns']}"
-        )
+        print("\n[EDA]")
+        print(f"rows: {summary['rows']}")
+        print(f"columns: {summary['columns']}")
 
         print(
             "missing cells: "
@@ -126,21 +108,14 @@ def main() -> None:
     # model-viz는 이미 저장된 모델 평가 결과만 사용하므로
     # Adult 데이터를 다시 불러올 필요가 없다.
     if args.stage == "model-viz":
-        output_paths = (
-            create_model_visualizations()
-        )
-
-        print(
-            "\n[MODEL VISUALIZATION]"
-        )
+        output_paths = (create_model_visualizations())
+        print("\n[MODEL VISUALIZATION]")
 
         for (
             name,
             path,
         ) in output_paths.items():
-            print(
-                f"{name}: {path}"
-            )
+            print(f"{name}: {path}")
 
         return
 
@@ -158,17 +133,9 @@ def main() -> None:
     )
 
     if args.stage == "data":
-        print(
-            "\n[DATA]"
-        )
-
-        print(
-            f"rows: {len(df)}"
-        )
-
-        print(
-            f"columns: {len(df.columns)}"
-        )
+        print("\n[DATA]")
+        print(f"rows: {len(df)}")
+        print(f"columns: {len(df.columns)}")
 
         return
 
@@ -180,44 +147,28 @@ def main() -> None:
         "all",
         "model",
     }:
-        metrics = (
-            train_income_model(
-                df
-            )
-        )
-
-        print(
-            "\n[MODEL]"
-        )
+        metrics = (train_income_model(df))
+        print("\n[MODEL]")
 
         for (
             metric,
             value,
         ) in metrics.items():
-            print(
-                f"{metric}: {value}"
-            )
+            print(f"{metric}: {value}")
 
     # --------------------------------------------------------
     # 모델 진단 시각화
     # --------------------------------------------------------
 
     if args.stage == "all":
-        output_paths = (
-            create_model_visualizations()
-        )
-
-        print(
-            "\n[MODEL VISUALIZATION]"
-        )
+        output_paths = (create_model_visualizations())
+        print("\n[MODEL VISUALIZATION]")
 
         for (
             name,
             path,
         ) in output_paths.items():
-            print(
-                f"{name}: {path}"
-            )
+            print(f"{name}: {path}")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-13T04:20:24.882050+00:00",
+  "generated_at": "2026-08-19T00:57:29.526441+00:00",
   "model_name": "hist_gradient_boosting",
   "hyperparameters": {
     "learning_rate": 0.14447746112718687,
@@ -7,6 +7,11 @@
     "max_iter": 154,
     "l2_regularization": 0.45606998421703593
   },
+  "probability_calibration": {
+    "method": "sigmoid",
+    "cv_folds": 3
+  },
+  "classification_threshold": 0.5,
   "random_state": 42,
   "train_rows": 26029,
   "test_rows": 6508,
@@ -47,23 +52,37 @@
     "violations": [
       {
         "group_column": "race",
+        "group_value": "Black",
+        "type": "min_recall",
+        "value": 0.5747126436781609,
+        "threshold": 0.6
+      },
+      {
+        "group_column": "race",
         "type": "recall_gap",
-        "value": 0.10848613523772754,
+        "value": 0.10681601874222124,
         "threshold": 0.1,
-        "lowest_group_value": "Asian-Pac-Islander",
-        "lowest_group_recall": 0.7818181818181819,
+        "lowest_group_value": "Black",
+        "lowest_group_recall": 0.5747126436781609,
         "highest_group_value": "White",
-        "highest_group_recall": 0.8903043170559094
+        "highest_group_recall": 0.6815286624203821
+      },
+      {
+        "group_column": "sex",
+        "group_value": "Female",
+        "type": "min_recall",
+        "value": 0.5905511811023622,
+        "threshold": 0.6
       },
       {
         "group_column": "sex",
         "type": "recall_gap",
-        "value": 0.11607881206629989,
+        "value": 0.10046860580783568,
         "threshold": 0.1,
         "lowest_group_value": "Female",
-        "lowest_group_recall": 0.7834645669291339,
+        "lowest_group_recall": 0.5905511811023622,
         "highest_group_value": "Male",
-        "highest_group_recall": 0.8995433789954338
+        "highest_group_recall": 0.6910197869101978
       }
     ]
   }

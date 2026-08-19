@@ -32,14 +32,21 @@ from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.inspection import permutation_importance
+from sklearn.base import BaseEstimator
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import (
     accuracy_score,
+    brier_score_loss,
     f1_score,
+    log_loss,
     precision_score,
     recall_score,
     roc_auc_score,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import (
+    StratifiedKFold,
+    train_test_split,
+)
 from sklearn.pipeline import Pipeline
 
 from src.config import (
@@ -88,6 +95,10 @@ MODEL_PARAMS = {
     ),
 }
 
+CALIBRATION_METHOD = "sigmoid"
+CALIBRATION_CV_FOLDS = 3
+
+CLASSIFICATION_THRESHOLD = 0.50
 
 class ModelingError(RuntimeError):
     """모델 학습·저장·추론 과정에서 발생하는 오류."""
@@ -97,7 +108,7 @@ class ModelingError(RuntimeError):
 class ModelEvaluation:
     """모델 학습·평가 결과를 메모리에서 전달하는 컨테이너."""
 
-    pipeline: Pipeline
+    pipeline: BaseEstimator
     metrics: dict
     fairness: pd.DataFrame
     feature_importance: pd.DataFrame
@@ -634,6 +645,38 @@ def _build_pipeline(
         ]
     )
 
+def _build_calibrated_model(
+    numeric_columns: list[str],
+    categorical_columns: list[str],
+) -> CalibratedClassifierCV:
+    """현재 예측 Pipeline에 Sigmoid probability calibration을 적용한다."""
+
+    base_pipeline = (
+        _build_pipeline(
+            numeric_columns,
+            categorical_columns,
+        )
+    )
+
+    calibration_cv = (
+        StratifiedKFold(
+            n_splits=(
+                CALIBRATION_CV_FOLDS
+            ),
+            shuffle=True,
+            random_state=(
+                RANDOM_STATE
+            ),
+        )
+    )
+
+    return CalibratedClassifierCV(
+        estimator=base_pipeline,
+        method=CALIBRATION_METHOD,
+        cv=calibration_cv,
+        ensemble=True,
+        n_jobs=-1,
+    )
 
 # ============================================================
 # 모델 공정성 진단
@@ -903,7 +946,7 @@ def _assess_fairness(
 # ============================================================
 
 def _feature_importance(
-    pipeline: Pipeline,
+    pipeline: BaseEstimator,
     X_test: pd.DataFrame,
     y_test: pd.Series,
     n_repeats: int = 10,
@@ -973,6 +1016,20 @@ def _build_model_card(
         "hyperparameters": (
             MODEL_PARAMS
         ),
+
+        "probability_calibration": {
+            "method": (
+                CALIBRATION_METHOD
+            ),
+            "cv_folds": (
+                CALIBRATION_CV_FOLDS
+            ),
+        },
+
+        "classification_threshold": (
+            CLASSIFICATION_THRESHOLD
+        ),
+
         "random_state": (
             RANDOM_STATE
         ),
@@ -1081,9 +1138,11 @@ def evaluate_income_model(
         categorical_columns,
     ) = _feature_type_columns()
 
-    pipeline = _build_pipeline(
-        numeric_columns,
-        categorical_columns,
+    pipeline = (
+        _build_calibrated_model(
+            numeric_columns,
+            categorical_columns,
+        )
     )
 
     try:
@@ -1097,17 +1156,16 @@ def evaluate_income_model(
         ) from exc
 
     try:
-        prediction = (
-            pipeline.predict(
-                X_test
-            )
-        )
-
         probability = (
             pipeline.predict_proba(
                 X_test
             )[:, 1]
         )
+
+        prediction = (
+            probability
+            >= CLASSIFICATION_THRESHOLD
+        ).astype(int)
 
     except Exception as exc:
         raise ModelingError(
@@ -1118,15 +1176,26 @@ def evaluate_income_model(
         "model_name": (
             "hist_gradient_boosting"
         ),
+
+        "calibration_method": (
+            CALIBRATION_METHOD
+        ),
+
+        "classification_threshold": (
+            CLASSIFICATION_THRESHOLD
+        ),
+
         "test_rows": int(
             len(X_test)
         ),
+
         "accuracy": float(
             accuracy_score(
                 y_test,
                 prediction,
             )
         ),
+
         "precision": float(
             precision_score(
                 y_test,
@@ -1134,6 +1203,7 @@ def evaluate_income_model(
                 zero_division=0,
             )
         ),
+
         "recall": float(
             recall_score(
                 y_test,
@@ -1141,6 +1211,7 @@ def evaluate_income_model(
                 zero_division=0,
             )
         ),
+
         "f1": float(
             f1_score(
                 y_test,
@@ -1148,11 +1219,43 @@ def evaluate_income_model(
                 zero_division=0,
             )
         ),
+
         "roc_auc": float(
             roc_auc_score(
                 y_test,
                 probability,
             )
+        ),
+
+        "brier_score": float(
+            brier_score_loss(
+                y_test,
+                probability,
+            )
+        ),
+
+        "log_loss": float(
+            log_loss(
+                y_test,
+                probability,
+                labels=[
+                    0,
+                    1,
+                ],
+            )
+        ),
+
+        "actual_positive_rate": float(
+            y_test.mean()
+        ),
+
+        "mean_predicted_probability": float(
+            probability.mean()
+        ),
+
+        "mean_probability_bias": float(
+            probability.mean()
+            - y_test.mean()
         ),
     }
 
@@ -1239,6 +1342,15 @@ def _save_outputs(
         "pipeline": (
             evaluation.pipeline
         ),
+
+        "classification_threshold": (
+            CLASSIFICATION_THRESHOLD
+        ),
+
+        "calibration_method": (
+            CALIBRATION_METHOD
+        ),
+
         "input_schema": (
             evaluation.input_schema
         ),
@@ -1473,17 +1585,23 @@ def _predict_with_bundle(
     )
 
     try:
-        prediction = (
-            pipeline.predict(
-                X
-            )
-        )
-
         probability = (
             pipeline.predict_proba(
                 X
             )[:, 1]
         )
+
+        threshold = float(
+            bundle.get(
+                "classification_threshold",
+                0.50,
+            )
+        )
+
+        prediction = (
+            probability
+            >= threshold
+        ).astype(int)
 
     except Exception as exc:
         raise ModelingError(

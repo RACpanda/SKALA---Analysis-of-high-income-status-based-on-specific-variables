@@ -86,9 +86,7 @@ st.markdown(
         font-weight: 600 !important;
     }
 
-    h2 {
-        margin-top: 1.8rem !important;
-    }
+    h2 { margin-top: 1.8rem !important;}
 
     /* -------------------------------------------------------
        Hero
@@ -110,9 +108,7 @@ st.markdown(
         margin-bottom: 0.8rem;
     }
 
-    .hero-title,
-    h1,
-    h2 {
+    .hero-title, h1, h2 {
         font-family:
             "Cormorant Garamond",
             "Noto Serif KR",
@@ -120,13 +116,7 @@ st.markdown(
             serif;
     }
 
-    body,
-    p,
-    label,
-    button,
-    input,
-    textarea,
-    [data-testid="stMetric"] {
+    body, p, label, button, input, textarea, [data-testid="stMetric"] {
         font-family:
             -apple-system,
             BlinkMacSystemFont,
@@ -204,30 +194,18 @@ st.markdown(
         border-radius: 10px;
     }
 
-    div[data-testid="stMetric"] {
-        background: rgba(255, 255, 255, 0.45);
-    }
-
-    div[data-baseweb="select"] > div {
-        background-color: #FCFBF8;
-    }
-
-    div[data-testid="stVerticalBlock"] {
-        gap: 0.8rem;
-    }
+    div[data-testid="stMetric"] {background: rgba(255, 255, 255, 0.45);}
+    div[data-baseweb="select"] > div {background-color: #FCFBF8;}
+    div[data-testid="stVerticalBlock"] {gap: 0.8rem;}
 
     hr {
         margin-top: 1.2rem !important;
         margin-bottom: 1.6rem !important;
     }
 
-    hr {
-        border-color: #DDDAD3 !important;
-    }
+    hr {border-color: #DDDAD3 !important;}
+    footer {visibility: hidden;}
 
-    footer {
-        visibility: hidden;
-    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -271,9 +249,7 @@ def _variable_label(
         variable,
     )
 
-    return (
-        f"{korean} ({variable})"
-    )
+    return (f"{korean} ({variable})")
 
 
 # ============================================================
@@ -284,28 +260,19 @@ def _variable_label(
 def load_service_data() -> pd.DataFrame:
     """서비스에서 공통으로 사용할 정제 Adult 데이터를 로딩한다."""
 
-    return load_and_clean(
-        save_output=False,
-    )
-
+    return load_and_clean(save_output=False,)
 
 @st.cache_data
 def load_prediction_schema() -> dict:
     """예측 입력 폼 생성에 필요한 모델 스키마를 반환한다."""
 
-    return (
-        get_prediction_input_schema()
-    )
-
+    return (get_prediction_input_schema())
 
 @st.cache_data
 def load_global_importance() -> pd.DataFrame:
     """현재 저장된 모델의 전체 permutation importance를 반환한다."""
 
-    return (
-        get_global_feature_importance()
-    )
-
+    return (get_global_feature_importance())
 
 # ============================================================
 # 공통 표시 함수
@@ -319,9 +286,7 @@ def _format_p_value(
     if value is None:
         return "추정 불가"
 
-    value = float(
-        value
-    )
+    value = float(value)
 
     if value < 0.001:
         return f"{value:.2e}"
@@ -337,9 +302,7 @@ def _format_percent(
     if value is None:
         return "-"
 
-    return (
-        f"{float(value) * 100:.2f}%"
-    )
+    return (f"{float(value) * 100:.2f}%")
 
 
 def _display_interpretation_note(
@@ -366,34 +329,15 @@ def display_unadjusted_result(
 ) -> None:
     """관심 변수 유형에 따라 조정 전 통계 결과를 표시한다."""
 
-    analysis = result[
-        "analysis"
-    ]
-
-    exposure_type = analysis[
-        "exposure_type"
-    ]
-
-    unadjusted = analysis[
-        "unadjusted"
-    ]
+    analysis = result["analysis"]
+    exposure_type = analysis["exposure_type"]
+    unadjusted = analysis["unadjusted"]
 
     if exposure_type == "binary":
-        metadata = unadjusted[
-            "exposure_metadata"
-        ]
-
-        reference = metadata[
-            "reference_level"
-        ]
-
-        comparison = metadata[
-            "comparison_level"
-        ]
-
-        col1, col2, col3 = (
-            st.columns(3)
-        )
+        metadata = unadjusted["exposure_metadata"]
+        reference = metadata["reference_level"]
+        comparison = metadata["comparison_level"]
+        col1, col2, col3 = (st.columns(3))
 
         with col1:
             st.metric(
@@ -408,70 +352,40 @@ def display_unadjusted_result(
         with col2:
             st.metric(
                 f"{comparison} 고소득률",
-                _format_percent(
-                    unadjusted[
-                        "comparison_rate"
-                    ]
-                ),
+                _format_percent(unadjusted["comparison_rate"]),
             )
 
         with col3:
             st.metric(
                 "고소득률 차이",
-                (
-                    f"{unadjusted['rate_difference'] * 100:+.2f}%p"
-                ),
+                (f"{unadjusted['rate_difference'] * 100:+.2f}%p"),
             )
 
         table = pd.DataFrame(
             [
                 {
                     "통계량": "Risk Ratio",
-                    "값": (
-                        unadjusted[
-                            "risk_ratio"
-                        ]
-                    ),
+                    "값": (unadjusted["risk_ratio"]),
                 },
                 {
                     "통계량": "Odds Ratio",
-                    "값": (
-                        unadjusted[
-                            "odds_ratio"
-                        ]
-                    ),
+                    "값": (unadjusted["odds_ratio"]),
                 },
                 {
                     "통계량": "OR 95% CI 하한",
-                    "값": (
-                        unadjusted[
-                            "odds_ratio_ci_95_low"
-                        ]
-                    ),
+                    "값": (unadjusted["odds_ratio_ci_95_low"]),
                 },
                 {
                     "통계량": "OR 95% CI 상한",
-                    "값": (
-                        unadjusted[
-                            "odds_ratio_ci_95_high"
-                        ]
-                    ),
+                    "값": (unadjusted["odds_ratio_ci_95_high"]),
                 },
                 {
                     "통계량": "Cohen's h",
-                    "값": (
-                        unadjusted[
-                            "cohens_h"
-                        ]
-                    ),
+                    "값": (unadjusted["cohens_h"]),
                 },
                 {
                     "통계량": "Fisher exact p-value",
-                    "값": (
-                        unadjusted[
-                            "fisher_exact_p_value"
-                        ]
-                    ),
+                    "값": (unadjusted["fisher_exact_p_value"]),
                 },
             ]
         )
@@ -483,26 +397,18 @@ def display_unadjusted_result(
         )
 
     elif exposure_type == "continuous":
-        col1, col2 = (
-            st.columns(2)
-        )
+        col1, col2 = (st.columns(2))
 
         with col1:
             st.metric(
                 "Point-biserial correlation",
-                (
-                    f"{unadjusted['correlation']:.4f}"
-                ),
+                (f"{unadjusted['correlation']:.4f}"),
             )
 
         with col2:
             st.metric(
                 "p-value",
-                _format_p_value(
-                    unadjusted[
-                        "p_value"
-                    ]
-                ),
+                _format_p_value(unadjusted["p_value"]),
             )
 
         st.caption(
@@ -511,63 +417,34 @@ def display_unadjusted_result(
         )
 
     elif exposure_type == "categorical":
-        col1, col2, col3 = (
-            st.columns(3)
-        )
+        col1, col2, col3 = (st.columns(3))
 
         with col1:
             st.metric(
                 "Chi-square",
-                (
-                    f"{unadjusted['chi2_statistic']:.3f}"
-                ),
+                (f"{unadjusted['chi2_statistic']:.3f}"),
             )
 
         with col2:
             st.metric(
                 "p-value",
-                _format_p_value(
-                    unadjusted[
-                        "chi2_p_value"
-                    ]
-                ),
+                _format_p_value(unadjusted["chi2_p_value"]),
             )
 
         with col3:
             st.metric(
                 "자유도",
-                unadjusted[
-                    "degrees_of_freedom"
-                ],
+                unadjusted["degrees_of_freedom"],
             )
 
-        group_table = pd.DataFrame(
-            unadjusted[
-                "groups"
-            ]
-        )
+        group_table = pd.DataFrame(unadjusted["groups"])
 
-        group_table[
-            "고소득률 (%)"
-        ] = (
-            group_table[
-                "target_rate"
-            ]
-            * 100
-        )
+        group_table["고소득률 (%)"] = (group_table["target_rate"]* 100)
 
         group_table = (
             group_table
-            .drop(
-                columns=[
-                    "target_rate",
-                ]
-            )
-            .rename(
-                columns={
-                    "n": "표본 수",
-                }
-            )
+            .drop(columns=["target_rate",])
+            .rename(columns={"n": "표본 수",})
         )
 
         st.dataframe(
@@ -586,13 +463,7 @@ def display_adjusted_result(
 ) -> None:
     """조정된 관심 변수 Odds Ratio 결과를 표시한다."""
 
-    adjusted = (
-        result[
-            "analysis"
-        ][
-            "adjusted"
-        ]
-    )
+    adjusted = (result["analysis"]["adjusted"])
 
     effects = (
         adjusted[
@@ -1269,9 +1140,7 @@ def association_page(
         unsafe_allow_html=True,
     )
 
-    st.subheader(
-        "조정 고소득 확률"
-    )
+    st.subheader("조정 고소득 확률")
 
     st.caption(
         "통제 변수의 실제 관측값은 유지한 채 "
@@ -1790,9 +1659,7 @@ def prediction_page() -> None:
     # 개인별 설명
     # --------------------------------------------------------
 
-    st.subheader(
-        "개인 입력 기준 예측 설명"
-    )
+    st.subheader("개인 입력 기준 예측 설명")
 
     st.caption(
         "각 변수의 현재 값을 학습 데이터의 대표값으로 "
@@ -1801,9 +1668,7 @@ def prediction_page() -> None:
 
     try:
         explanation_figure = (
-            plot_prediction_explanation(
-                prediction_result
-            )
+            plot_prediction_explanation(prediction_result)
         )
 
         st.plotly_chart(
@@ -1812,25 +1677,17 @@ def prediction_page() -> None:
         )
 
     except VisualizationError as exc:
-        st.warning(
-            f"개인 예측 설명 그래프를 표시하지 못했습니다: {exc}"
-        )
+        st.warning(f"개인 예측 설명 그래프를 표시하지 못했습니다: {exc}")
 
     _display_interpretation_note(
-        prediction_result[
-            "explanation"
-        ][
-            "interpretation_note"
-        ]
+        prediction_result["explanation"]["interpretation_note"]
     )
 
     # --------------------------------------------------------
     # 전체 모델 Feature Importance
     # --------------------------------------------------------
 
-    st.subheader(
-        "전체 모델 기준 예측 변수 중요도"
-    )
+    st.subheader("전체 모델 기준 예측 변수 중요도")
 
     st.caption(
         "개별 사용자가 아니라 전체 테스트 데이터에서 "
@@ -1839,15 +1696,8 @@ def prediction_page() -> None:
     )
 
     try:
-        importance = (
-            load_global_importance()
-        )
-
-        importance_figure = (
-            plot_global_feature_importance(
-                importance
-            )
-        )
+        importance = (load_global_importance())
+        importance_figure = (plot_global_feature_importance(importance))
 
         st.plotly_chart(
             importance_figure,
@@ -1858,17 +1708,13 @@ def prediction_page() -> None:
         ModelingError,
         VisualizationError,
     ) as exc:
-        st.warning(
-            f"전체 모델 중요도를 표시하지 못했습니다: {exc}"
-        )
+        st.warning(f"전체 모델 중요도를 표시하지 못했습니다: {exc}")
 
     # --------------------------------------------------------
     # What-if
     # --------------------------------------------------------
 
-    st.subheader(
-        "What-if Simulation"
-    )
+    st.subheader("What-if Simulation")
 
     st.write(
         "다른 입력값은 그대로 유지하고 "
@@ -1887,55 +1733,33 @@ def prediction_page() -> None:
         use_container_width=True,
     ):
         try:
-            with st.spinner(
-                "시나리오별 예측을 계산하고 있습니다..."
-            ):
+            with st.spinner("시나리오별 예측을 계산하고 있습니다..."):
                 what_if = (
                     simulate_income_what_if(
                         prediction_input,
-                        feature=(
-                            what_if_feature
-                        ),
+                        feature=(what_if_feature),
                     )
                 )
 
-                what_if_figure = (
-                    plot_what_if_simulation(
-                        what_if
-                    )
-                )
+                what_if_figure = (plot_what_if_simulation(what_if))
 
         except (
             ModelingError,
             VisualizationError,
         ) as exc:
-            st.error(
-                str(exc)
-            )
+            st.error(str(exc))
 
         else:
-            st.session_state[
-                "what_if_result"
-            ] = what_if
-
-            st.session_state[
-                "what_if_figure"
-            ] = what_if_figure
-
-            st.session_state[
-                "what_if_result_feature"
-            ] = what_if_feature
+            st.session_state["what_if_result"] = what_if
+            st.session_state["what_if_figure"] = what_if_figure
+            st.session_state["what_if_result_feature"] = what_if_feature
 
     what_if_figure = (
-        st.session_state.get(
-            "what_if_figure"
-        )
+        st.session_state.get("what_if_figure")
     )
 
     what_if_result_feature = (
-        st.session_state.get(
-            "what_if_result_feature"
-        )
+        st.session_state.get("what_if_result_feature")
     )
 
     if (
@@ -1956,9 +1780,7 @@ def prediction_page() -> None:
         )
 
     _display_interpretation_note(
-        prediction_result[
-            "interpretation_note"
-        ]
+        prediction_result["interpretation_note"]
     )
 
 
@@ -2002,18 +1824,12 @@ def display_association_error(
             """
         )
 
-        with st.expander(
-            "기술적 상세 정보"
-        ):
-            st.code(
-                message
-            )
+        with st.expander("기술적 상세 정보"):
+            st.code(message)
 
         return
 
-    st.error(
-        message
-    )
+    st.error(message)
 
 def render_hero() -> None:
     """서비스의 상단 소개 영역을 표시한다."""
@@ -2042,9 +1858,7 @@ def main() -> None:
     render_hero()
 
     try:
-        df = (
-            load_service_data()
-        )
+        df = (load_service_data())
     except Exception as exc:
         st.error(
             "Adult 데이터를 불러오지 못했습니다: "
@@ -2052,9 +1866,7 @@ def main() -> None:
         )
         st.stop()
 
-    nav_left, nav_center, nav_right = st.columns(
-        [1, 3, 1]
-    )
+    nav_left, nav_center, nav_right = st.columns([1, 3, 1])
 
     with nav_center:
         mode = st.segmented_control(
@@ -2071,9 +1883,7 @@ def main() -> None:
     st.divider()
 
     if mode == "연관성 분석":
-        association_page(
-            df
-        )
+        association_page(df)
 
     else:
         prediction_page()

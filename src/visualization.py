@@ -1354,7 +1354,7 @@ def plot_global_feature_importance(
     *,
     top_n: int = 10,
 ) -> go.Figure:
-    """전체 테스트셋 기준 permutation importance를 시각화한다."""
+    """전체 테스트 데이터 기준 예측 중요도를 시각화한다."""
 
     _require_columns(
         feature_importance,
@@ -1363,18 +1363,33 @@ def plot_global_feature_importance(
             "importance_mean",
             "importance_std",
         ],
-        "전체 모델 Feature Importance",
+        "전체 모델 예측 중요도",
     )
 
     if feature_importance.empty:
         raise VisualizationError(
-            "Feature Importance 결과가 비어 있습니다."
+            "예측 중요도 결과가 비어 있습니다."
         )
 
     if top_n < 1:
         raise VisualizationError(
             "top_n은 1 이상이어야 합니다."
         )
+
+    feature_labels = {
+        "age": "나이",
+        "workclass": "고용 형태",
+        "education": "교육 수준",
+        "marital-status": "혼인 상태",
+        "occupation": "직업",
+        "relationship": "가구 내 관계",
+        "race": "인종",
+        "sex": "성별",
+        "capital-gain": "투자·자산 이익",
+        "capital-loss": "투자·자산 손실",
+        "hours-per-week": "주당 근무시간",
+        "native-country": "출신 국가",
+    }
 
     chart_data = (
         feature_importance
@@ -1390,6 +1405,22 @@ def plot_global_feature_importance(
         .copy()
     )
 
+    chart_data[
+        "feature_label"
+    ] = (
+        chart_data[
+            "feature"
+        ]
+        .map(
+            feature_labels
+        )
+        .fillna(
+            chart_data[
+                "feature"
+            ]
+        )
+    )
+
     figure = go.Figure()
 
     figure.add_trace(
@@ -1398,7 +1429,7 @@ def plot_global_feature_importance(
                 "importance_mean"
             ],
             y=chart_data[
-                "feature"
+                "feature_label"
             ],
             orientation="h",
             error_x={
@@ -1409,20 +1440,29 @@ def plot_global_feature_importance(
                 "visible": True,
             },
             hovertemplate=(
-                "%{y}"
-                "<br>Permutation Importance: %{x:.4f}"
+                "<b>%{y}</b>"
+                "<br>예측 중요도: %{x:.4f}"
                 "<extra></extra>"
             ),
         )
     )
 
     figure.update_layout(
-        title="전체 모델 기준 예측 변수 중요도",
+        title=(
+            "전체 데이터에서 많이 활용된 정보"
+        ),
         xaxis_title=(
-            "ROC-AUC Permutation Importance"
+            "예측 중요도"
         ),
         yaxis_title="",
         showlegend=False,
+        height=500,
+        margin={
+            "l": 20,
+            "r": 40,
+            "t": 70,
+            "b": 60,
+        },
     )
 
     return figure

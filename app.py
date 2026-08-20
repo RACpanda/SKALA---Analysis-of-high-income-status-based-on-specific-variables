@@ -2546,20 +2546,37 @@ def prediction_page() -> None:
     )
 
     # --------------------------------------------------------
-    # 전체 모델 Feature Importance
+    # 전체 모델 기준 중요도
     # --------------------------------------------------------
 
-    st.subheader("전체 모델 기준 예측 변수 중요도")
+    st.markdown(
+        """
+        <div class="section-number">
+            03 · 모델이 많이 참고한 정보
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.subheader(
+        "모델은 어떤 정보를 많이 참고했을까요?"
+    )
 
     st.caption(
-        "개별 사용자가 아니라 전체 테스트 데이터에서 "
-        "각 변수를 섞었을 때 ROC-AUC가 얼마나 감소하는지 측정한 "
-        "Permutation Importance입니다."
+        "전체 데이터를 기준으로 봤을 때 "
+        "모델이 예측에 많이 활용한 항목을 보여줍니다."
     )
 
     try:
-        importance = (load_global_importance())
-        importance_figure = (plot_global_feature_importance(importance))
+        importance = (
+            load_global_importance()
+        )
+
+        importance_figure = (
+            plot_global_feature_importance(
+                importance
+            )
+        )
 
         st.plotly_chart(
             importance_figure,
@@ -2570,7 +2587,15 @@ def prediction_page() -> None:
         ModelingError,
         VisualizationError,
     ) as exc:
-        st.warning(f"전체 모델 중요도를 표시하지 못했습니다: {exc}")
+        st.warning(
+            f"예측 중요도를 표시하지 못했습니다: {exc}"
+        )
+
+    st.caption(
+        "값이 클수록 해당 항목을 섞었을 때 "
+        "모델의 예측 성능이 더 많이 떨어졌다는 뜻입니다. "
+        "개인별 예측 결과나 실제 소득에 미치는 영향의 크기를 의미하지 않습니다."
+    )
 
     # --------------------------------------------------------
     # What-if

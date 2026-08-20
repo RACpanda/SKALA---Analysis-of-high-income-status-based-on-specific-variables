@@ -1248,8 +1248,12 @@ def plot_prediction_explanation(
 
 def plot_what_if_simulation(
     what_if: pd.DataFrame,
+    *,
+    feature_label: str | None = None,
+    category_labels: dict | None = None,
+    current_value=None,
 ) -> go.Figure:
-    """한 변수의 값만 변경했을 때 모델 예측 확률의 변화를 표시한다."""
+    """한 항목만 변경했을 때 예측 확률 변화를 표시한다."""
 
     _require_columns(
         what_if,
@@ -1258,93 +1262,176 @@ def plot_what_if_simulation(
             "value",
             "high_income_probability_percent",
         ],
-        "What-if 시각화",
+        "조건 변경 시뮬레이션",
     )
 
     if what_if.empty:
         raise VisualizationError(
-            "What-if 결과가 비어 있습니다."
+            "조건 변경 결과가 비어 있습니다."
         )
 
     feature = str(
-        what_if[
-            "feature"
-        ].iloc[0]
+        what_if["feature"].iloc[0]
+    )
+
+    display_feature = (
+        feature_label
+        if feature_label is not None
+        else feature
+    )
+
+    category_labels = (
+        category_labels or {}
     )
 
     numeric_values = pd.to_numeric(
-        what_if[
-            "value"
-        ],
+        what_if["value"],
         errors="coerce",
     )
 
-    # 모든 값이 숫자로 해석되면 연속적인 변화로 표시한다.
-    if numeric_values.notna().all():
-        chart_data = (
-            what_if.copy()
-        )
+    # ========================================================
+    # 연속형
+    # ========================================================
 
-        chart_data[
-            "value"
-        ] = numeric_values
+    if numeric_values.notna().all():
+
+        chart_data = what_if.copy()
+
+        chart_data["value"] = (
+            numeric_values
+        )
 
         chart_data = (
             chart_data
-            .sort_values(
-                "value"
-            )
+            .sort_values("value")
         )
 
         figure = px.line(
             chart_data,
             x="value",
-            y=(
-                "high_income_probability_percent"
-            ),
+            y="high_income_probability_percent",
             markers=True,
             title=(
-                f"{feature} 변화에 따른 모델 예측 확률"
+                f"{display_feature}를 바꿨을 때의 예측 변화"
             ),
             labels={
-                "value": feature,
+                "value": display_feature,
                 "high_income_probability_percent": (
-                    "고소득 예측 확률 (%)"
+                    "연 소득 5만 달러 초과 예측 확률 (%)"
                 ),
             },
         )
+
+        # 현재 입력값 위치 표시
+        if current_value is not None:
+            try:
+                current_numeric = float(
+                    current_value
+                )
+
+                figure.add_vline(
+                    x=current_numeric,
+                    line_dash="dash",
+                    annotation_text="현재 입력값",
+                    annotation_position="top",
+                )
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+                pass
+
+    # ========================================================
+    # 범주형
+    # ========================================================
 
     else:
+
+        chart_data = what_if.copy()
+
+        def format_category(
+            value,
+        ) -> str:
+            korean = (
+                category_labels.get(
+                    value
+                )
+            )
+
+            if korean is None:
+                label = str(value)
+
+            else:
+                label = (
+                    f"{korean} ({value})"
+                )
+
+            if (
+                current_value is not None
+                and value == current_value
+            ):
+                return (
+                    f"{label} · 현재"
+                )
+
+            return label
+
+        chart_data[
+            "value_label"
+        ] = chart_data[
+            "value"
+        ].map(
+            format_category
+        )
+
         figure = px.bar(
-            what_if,
-            x="value",
-            y=(
-                "high_income_probability_percent"
-            ),
+            chart_data,
+            x="value_label",
+            y="high_income_probability_percent",
             title=(
-                f"{feature} 변화에 따른 모델 예측 확률"
+                f"{display_feature}을(를) 바꿨을 때의 예측 변화"
             ),
             labels={
-                "value": feature,
+                "value_label": display_feature,
                 "high_income_probability_percent": (
-                    "고소득 예측 확률 (%)"
+                    "연 소득 5만 달러 초과 예측 확률 (%)"
                 ),
             },
         )
 
+    # ========================================================
+    # 공통 설정
+    # ========================================================
+
     figure.update_yaxes(
-        range=[
-            0,
-            100,
-        ]
+        range=[0, 100],
+        title=(
+            "연 소득 5만 달러 초과 예측 확률 (%)"
+        ),
+    )
+
+    figure.update_xaxes(
+        title=display_feature,
     )
 
     figure.update_traces(
         hovertemplate=(
-            f"{feature}: %{{x}}"
-            "<br>고소득 예측 확률: %{y:.2f}%"
+            f"<b>{display_feature}</b>: %{{x}}"
+            "<br>예측 확률: %{y:.1f}%"
             "<extra></extra>"
         )
+    )
+
+    figure.update_layout(
+        showlegend=False,
+        height=460,
+        margin={
+            "l": 20,
+            "r": 30,
+            "t": 70,
+            "b": 70,
+        },
     )
 
     return figure

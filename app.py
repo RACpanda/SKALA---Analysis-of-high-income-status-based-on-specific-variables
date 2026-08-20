@@ -38,7 +38,6 @@ from src.visualization import (
     create_association_visualizations,
     plot_global_feature_importance,
     plot_prediction_explanation,
-    plot_prediction_probability,
     plot_what_if_simulation,
 )
 
@@ -189,6 +188,9 @@ st.markdown(
         height: 1.25rem;
     }
 
+    .result-section-spacer {
+        height: 2rem;
+    }
     /* -------------------------------------------------------
        Streamlit components
     ------------------------------------------------------- */
@@ -1794,6 +1796,10 @@ def association_page(
         )
     )
 
+    st.markdown(
+        '<div class="result-section-spacer"></div>',
+        unsafe_allow_html=True,
+    )
 
     st.markdown(
         """
@@ -1840,6 +1846,10 @@ def association_page(
         )
     )
 
+    st.markdown(
+        '<div class="result-section-spacer"></div>',
+        unsafe_allow_html=True,
+    )
 
     if applied_controls:
 
@@ -1902,6 +1912,10 @@ def association_page(
         )
     )
 
+    st.markdown(
+        '<div class="result-section-spacer"></div>',
+        unsafe_allow_html=True,
+    )
 
     if applied_controls:
 
@@ -1981,6 +1995,11 @@ def association_page(
         "psm"
     )
 
+    st.markdown(
+        '<div class="result-section-spacer"></div>',
+        unsafe_allow_html=True,
+    )
+    
     if psm is not None:
         st.markdown(
             '<div class="section-number">'
@@ -2246,6 +2265,10 @@ def prediction_page() -> None:
             border=True
         ):
             st.markdown(
+                '<div class="result-section-spacer"></div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
                 """
                 <div class="section-number">
                     01 · 기본 정보
@@ -2340,6 +2363,10 @@ def prediction_page() -> None:
             border=True
         ):
             st.markdown(
+                '<div class="result-section-spacer"></div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
                 """
                 <div class="section-number">
                     03 · 추가 소득 정보
@@ -2428,6 +2455,17 @@ def prediction_page() -> None:
         ] = dict(
             user_input
         )
+        # 새로운 예측을 실행하면
+        # 이전 What-if 결과를 초기화한다.
+        for key in [
+            "what_if_result",
+            "what_if_figure",
+            "what_if_result_feature",
+        ]:
+            st.session_state.pop(
+                key,
+                None,
+            )
     prediction_result = (
         st.session_state.get(
             "prediction_result"
@@ -2502,6 +2540,10 @@ def prediction_page() -> None:
     # --------------------------------------------------------
     # 내 입력값에 따른 예측 변화
     # --------------------------------------------------------
+    st.markdown(
+        '<div class="result-section-spacer"></div>',
+        unsafe_allow_html=True,
+    )
 
     st.markdown(
         """
@@ -2598,55 +2640,114 @@ def prediction_page() -> None:
     )
 
     # --------------------------------------------------------
-    # What-if
+    # 조건을 바꿔서 확인하기
     # --------------------------------------------------------
+    st.markdown(
+        '<div class="result-section-spacer"></div>',
+        unsafe_allow_html=True,
+    )
 
-    st.subheader("What-if Simulation")
+    st.markdown(
+        """
+        <div class="section-number">
+            04 · what-if 
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    st.write(
-        "다른 입력값은 그대로 유지하고 "
-        "한 변수만 변경하여 모델 예측 확률의 변화를 확인합니다."
+    st.subheader(
+        "What-if simulation"
+    )
+
+    st.caption(
+        "나머지 정보는 그대로 두고, "
+        "선택한 항목만 바꿨을 때 "
+        "연 소득 5만 달러 초과 예측 확률이 "
+        "어떻게 달라지는지 확인해보세요."
     )
 
     what_if_feature = st.selectbox(
-        "변경할 변수",
+        "바꿔볼 항목",
         options=feature_columns,
-        format_func=_variable_label,
+        format_func=lambda feature: (
+            VARIABLE_LABELS.get(
+                feature,
+                feature,
+            )
+        ),
         key="what_if_feature",
     )
 
     if st.button(
-        "What-if 실행",
-        use_container_width=True,
+        "변화 확인하기",
+        type="primary",
+        width="stretch",
     ):
         try:
-            with st.spinner("시나리오별 예측을 계산하고 있습니다..."):
+            with st.spinner(
+                "조건을 바꿨을 때의 결과를 계산하고 있습니다..."
+            ):
                 what_if = (
                     simulate_income_what_if(
                         prediction_input,
-                        feature=(what_if_feature),
+                        feature=what_if_feature,
                     )
                 )
 
-                what_if_figure = (plot_what_if_simulation(what_if))
+                what_if_figure = (
+                    plot_what_if_simulation(
+                        what_if,
+                        feature_label=(
+                            VARIABLE_LABELS.get(
+                                what_if_feature,
+                                what_if_feature,
+                            )
+                        ),
+                        category_labels=(
+                            CATEGORY_VALUE_LABELS.get(
+                                what_if_feature,
+                                {},
+                            )
+                        ),
+                        current_value=(
+                            prediction_input.get(
+                                what_if_feature
+                            )
+                        ),
+                    )
+                )
 
         except (
             ModelingError,
             VisualizationError,
         ) as exc:
-            st.error(str(exc))
+            st.error(
+                str(exc)
+            )
 
         else:
-            st.session_state["what_if_result"] = what_if
-            st.session_state["what_if_figure"] = what_if_figure
-            st.session_state["what_if_result_feature"] = what_if_feature
+            st.session_state[
+                "what_if_result"
+            ] = what_if
 
-    what_if_figure = (
-        st.session_state.get("what_if_figure")
+            st.session_state[
+                "what_if_figure"
+            ] = what_if_figure
+
+            st.session_state[
+                "what_if_result_feature"
+            ] = what_if_feature
+
+
+    what_if_figure = st.session_state.get(
+        "what_if_figure"
     )
 
     what_if_result_feature = (
-        st.session_state.get("what_if_result_feature")
+        st.session_state.get(
+            "what_if_result_feature"
+        )
     )
 
     if (
@@ -2660,15 +2761,11 @@ def prediction_page() -> None:
         )
 
         st.caption(
-            "What-if 결과는 한 변수의 입력값을 바꾸었을 때 "
-            "현재 모델의 예측이 어떻게 달라지는지를 보여주며, "
-            "해당 변수를 실제로 변화시켰을 때 발생하는 "
-            "인과효과를 의미하지 않습니다."
+            "다른 조건은 그대로 둔 채 한 항목만 바꿔본 "
+            "모델의 예측 결과입니다. "
+            "실제로 해당 조건을 바꾸면 소득이 이렇게 "
+            "변한다는 뜻은 아닙니다."
         )
-
-    _display_interpretation_note(
-        prediction_result["interpretation_note"]
-    )
 
 # ============================================================
 # 앱 실행

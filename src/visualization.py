@@ -1078,13 +1078,11 @@ def plot_prediction_explanation(
     *,
     top_n: int = 8,
 ) -> go.Figure:
-    """현재 입력값을 대표값으로 바꿨을 때의 예측 확률 차이를 표시한다."""
+    """현재 입력값과 대표값의 예측 확률 차이를 표시한다."""
 
-    explanation = (
-        result.get(
-            "explanation",
-            {}
-        )
+    explanation = result.get(
+        "explanation",
+        {}
     )
 
     features = explanation.get(
@@ -1096,52 +1094,154 @@ def plot_prediction_explanation(
             "개인 예측 설명 데이터가 없습니다."
         )
 
+    feature_labels = {
+        "age": "나이",
+        "workclass": "고용 형태",
+        "education": "교육 수준",
+        "marital-status": "혼인 상태",
+        "occupation": "직업",
+        "relationship": "가구 내 관계",
+        "race": "인종",
+        "sex": "성별",
+        "capital-gain": "투자·자산 이익",
+        "capital-loss": "투자·자산 손실",
+        "hours-per-week": "주당 근무시간",
+        "native-country": "출신 국가",
+    }
+
+    chart_data = pd.DataFrame(
+        features
+    ).copy()
+
+    # 영향이 큰 순서대로 상위 항목 선택
+    chart_data[
+        "absolute_impact"
+    ] = (
+        chart_data[
+            "impact_percentage_points"
+        ].abs()
+    )
+
     chart_data = (
-        pd.DataFrame(
-            features
+        chart_data
+        .sort_values(
+            "absolute_impact",
+            ascending=False,
         )
-        .head(
-            top_n
-        )
+        .head(top_n)
         .sort_values(
             "impact_percentage_points",
             ascending=True,
         )
+        .copy()
     )
+
+    chart_data[
+        "feature_label"
+    ] = (
+        chart_data["feature"]
+        .map(feature_labels)
+        .fillna(
+            chart_data["feature"]
+        )
+    )
+
+    # 막대 끝에 표시할 값
+    chart_data[
+        "impact_text"
+    ] = chart_data[
+        "impact_percentage_points"
+    ].map(
+        lambda value: (
+            f"{value:+.2f}%p"
+        )
+    )
+
+    # --------------------------------------------------------
+    # 작은 값도 보이도록 x축 범위를 동적으로 설정
+    # --------------------------------------------------------
+
+    max_abs_impact = float(
+        chart_data[
+            "impact_percentage_points"
+        ]
+        .abs()
+        .max()
+    )
+
+    if max_abs_impact < 0.01:
+        axis_limit = 0.05
+
+    else:
+        axis_limit = (
+            max_abs_impact
+            * 1.30
+        )
 
     figure = px.bar(
         chart_data,
         x="impact_percentage_points",
-        y="feature",
+        y="feature_label",
         orientation="h",
+        text="impact_text",
         custom_data=[
             "current_value",
             "reference_value",
         ],
         title=(
-            "현재 입력값에 따른 모델 예측 변화"
+            "입력값을 바꿨을 때의 예측 변화"
         ),
         labels={
-            "feature": "변수",
+            "feature_label": "",
             "impact_percentage_points": (
-                "대표값 대비 예측 확률 차이 (%p)"
+                "예측 확률 차이 (%p)"
             ),
         },
     )
 
+    # 기준선
     figure.add_vline(
         x=0,
         line_dash="dash",
     )
 
+    # 양수/음수가 균형 있게 보이도록 축 고정
+    figure.update_xaxes(
+        range=[
+            -axis_limit,
+            axis_limit,
+        ],
+        zeroline=False,
+        title=(
+            "대표적인 값과 비교한 예측 확률 차이 (%p)"
+        ),
+    )
+
+    figure.update_yaxes(
+        title=""
+    )
+
     figure.update_traces(
+        textposition="outside",
+        cliponaxis=False,
         hovertemplate=(
-            "%{y}"
-            "<br>확률 차이: %{x:.2f}%p"
-            "<br>현재 값: %{customdata[0]}"
-            "<br>대표값: %{customdata[1]}"
+            "<b>%{y}</b>"
+            "<br>예측 확률 차이: %{x:+.2f}%p"
+            "<br>현재 입력값: %{customdata[0]}"
+            "<br>대표적인 값: %{customdata[1]}"
             "<extra></extra>"
-        )
+        ),
+    )
+
+    figure.update_layout(
+        showlegend=False,
+        height=430,
+        margin={
+            "l": 20,
+            "r": 70,
+            "t": 70,
+            "b": 60,
+        },
     )
 
     return figure

@@ -48,7 +48,7 @@ from src.visualization import (
 # ============================================================
 
 st.set_page_config(
-    page_title="Adult Income Explorer",
+    page_title="소득 데이터 탐색 | SKALA",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -185,6 +185,10 @@ st.markdown(
         line-height: 1.7;
     }
 
+    .result-top-spacer {
+        height: 1.25rem;
+    }
+
     /* -------------------------------------------------------
        Streamlit components
     ------------------------------------------------------- */
@@ -204,7 +208,25 @@ st.markdown(
     }
 
     hr {border-color: #DDDAD3 !important;}
-    footer {visibility: hidden;}
+    /* -------------------------------------------------------
+    Streamlit chrome
+    ------------------------------------------------------- */
+
+    header[data-testid="stHeader"] {
+        display: none;
+    }
+
+    [data-testid="stToolbar"] {
+        display: none;
+    }
+
+    #MainMenu {
+        visibility: hidden;
+    }
+
+    footer {
+        visibility: hidden;
+    }
 
     </style>
     """,
@@ -218,19 +240,148 @@ st.markdown(
 
 VARIABLE_LABELS = {
     "age": "나이",
-    "workclass": "근무 형태",
+    "workclass": "고용 형태",
     "education": "교육 수준",
     "marital-status": "혼인 상태",
     "occupation": "직업",
-    "relationship": "가구 관계",
+    "relationship": "가구 내 관계",
     "race": "인종",
     "sex": "성별",
-    "capital-gain": "자본 이득",
-    "capital-loss": "자본 손실",
+    "capital-gain": "투자·자산 이익",
+    "capital-loss": "투자·자산 손실",
     "hours-per-week": "주당 근무시간",
     "native-country": "출신 국가",
 }
 
+CATEGORY_VALUE_LABELS = {
+    "sex": {
+        "Male": "남성",
+        "Female": "여성",
+    },
+
+    "race": {
+        "White": "백인",
+        "Black": "흑인",
+        "Asian-Pac-Islander": "아시아·태평양계",
+        "Amer-Indian-Eskimo": "아메리카 원주민·알래스카 원주민",
+        "Other": "기타",
+    },
+
+    "relationship": {
+        "Husband": "남편",
+        "Wife": "아내",
+        "Own-child": "자녀",
+        "Not-in-family": "가족 외",
+        "Other-relative": "기타 친족",
+        "Unmarried": "미혼·비혼",
+    },
+
+    "marital-status": {
+        "Married-civ-spouse": "기혼·배우자 동거",
+        "Divorced": "이혼",
+        "Never-married": "미혼",
+        "Separated": "별거",
+        "Widowed": "사별",
+        "Married-spouse-absent": "기혼·배우자 부재",
+        "Married-AF-spouse": "군인 배우자와 기혼",
+    },
+
+    "workclass": {
+        "Private": "민간 기업",
+        "Self-emp-not-inc": "자영업·비법인",
+        "Self-emp-inc": "자영업·법인",
+        "Federal-gov": "연방정부",
+        "Local-gov": "지방정부",
+        "State-gov": "주정부",
+        "Without-pay": "무급 근무",
+        "Never-worked": "근무 경험 없음",
+    },
+
+    "education": {
+        "Preschool": "취학 전",
+        "1st-4th": "초등 1~4학년",
+        "5th-6th": "초등 5~6학년",
+        "7th-8th": "중학교 수준",
+        "9th": "9학년",
+        "10th": "10학년",
+        "11th": "11학년",
+        "12th": "12학년",
+        "HS-grad": "고등학교 졸업",
+        "Some-college": "대학 일부 이수",
+        "Assoc-voc": "전문학사·직업 과정",
+        "Assoc-acdm": "전문학사·학술 과정",
+        "Bachelors": "학사",
+        "Masters": "석사",
+        "Prof-school": "전문대학원",
+        "Doctorate": "박사",
+    },
+
+    "occupation": {
+        "Adm-clerical": "사무·행정직",
+        "Armed-Forces": "군인",
+        "Craft-repair": "기능·수리직",
+        "Exec-managerial": "관리·경영직",
+        "Farming-fishing": "농림·어업",
+        "Handlers-cleaners": "운반·청소직",
+        "Machine-op-inspct": "기계 조작·검사직",
+        "Other-service": "기타 서비스직",
+        "Priv-house-serv": "가사 서비스직",
+        "Prof-specialty": "전문직",
+        "Protective-serv": "보안·보호 서비스직",
+        "Sales": "판매직",
+        "Tech-support": "기술 지원직",
+        "Transport-moving": "운송직",
+    },
+
+    "native-country": {
+        "United-States": "미국",
+        "Canada": "캐나다",
+        "Mexico": "멕시코",
+        "Puerto-Rico": "푸에르토리코",
+        "Cuba": "쿠바",
+        "Jamaica": "자메이카",
+        "Dominican-Republic": "도미니카공화국",
+        "Haiti": "아이티",
+        "Guatemala": "과테말라",
+        "Honduras": "온두라스",
+        "Nicaragua": "니카라과",
+        "El-Salvador": "엘살바도르",
+        "Trinadad&Tobago": "트리니다드 토바고",
+
+        "England": "영국",
+        "Germany": "독일",
+        "France": "프랑스",
+        "Italy": "이탈리아",
+        "Poland": "폴란드",
+        "Portugal": "포르투갈",
+        "Ireland": "아일랜드",
+        "Greece": "그리스",
+        "Hungary": "헝가리",
+        "Scotland": "스코틀랜드",
+        "Yugoslavia": "유고슬라비아",
+        "Holand-Netherlands": "네덜란드",
+
+        "India": "인도",
+        "China": "중국",
+        "Japan": "일본",
+        "Vietnam": "베트남",
+        "Philippines": "필리핀",
+        "Thailand": "태국",
+        "Cambodia": "캄보디아",
+        "Laos": "라오스",
+        "Taiwan": "대만",
+        "Hong": "홍콩",
+
+        "Iran": "이란",
+
+        "Columbia": "콜롬비아",
+        "Ecuador": "에콰도르",
+        "Peru": "페루",
+
+        "South": "대한민국",
+        "Outlying-US(Guam-USVI-etc)": "미국령 지역",
+    },
+}
 
 VARIABLE_TYPE_LABELS = {
     "binary": "이진형",
@@ -238,6 +389,22 @@ VARIABLE_TYPE_LABELS = {
     "categorical": "범주형",
 }
 
+def _category_value_label(
+    feature: str,
+    value: str,
+) -> str:
+    """범주 값을 한글(영어) 형식으로 표시한다."""
+
+    korean = (
+        CATEGORY_VALUE_LABELS
+        .get(feature, {})
+        .get(value)
+    )
+
+    if korean is None:
+        return str(value)
+
+    return f"{korean} ({value})"
 
 def _variable_label(
     variable: str,
@@ -319,280 +486,813 @@ def _display_interpretation_note(
         unsafe_allow_html=True,
     )
 
+def _result_value_label(
+    variable: str,
+    value,
+) -> str:
+    """분석 결과의 범주 값을 사용자 표시용 이름으로 변환한다."""
+
+    labels = globals().get(
+        "CATEGORY_VALUE_LABELS",
+        {},
+    )
+
+    korean = (
+        labels
+        .get(variable, {})
+        .get(value)
+    )
+
+    if korean is None:
+        return str(value)
+
+    return f"{korean} ({value})"
 
 # ============================================================
 # 조정 전 결과
 # ============================================================
 
+# ============================================================
+# 데이터에서 보이는 관계
+# ============================================================
+
 def display_unadjusted_result(
     result: dict,
 ) -> None:
-    """관심 변수 유형에 따라 조정 전 통계 결과를 표시한다."""
+    """다른 조건을 고려하기 전 관찰된 관계를 사용자 친화적으로 표시한다."""
 
+    request = result["request"]
     analysis = result["analysis"]
-    exposure_type = analysis["exposure_type"]
-    unadjusted = analysis["unadjusted"]
 
-    if exposure_type == "binary":
-        metadata = unadjusted["exposure_metadata"]
-        reference = metadata["reference_level"]
-        comparison = metadata["comparison_level"]
-        col1, col2, col3 = (st.columns(3))
+    exposure = request["exposure"]
+    exposure_label = VARIABLE_LABELS.get(
+        exposure,
+        exposure,
+    )
+
+    exposure_type = analysis[
+        "exposure_type"
+    ]
+
+    unadjusted = analysis[
+        "unadjusted"
+    ]
+
+    # ========================================================
+    # 1. 연속형
+    # ========================================================
+
+    if exposure_type == "continuous":
+
+        correlation = float(
+            unadjusted["correlation"]
+        )
+
+        p_value = float(
+            unadjusted["p_value"]
+        )
+
+        # 사용자용 핵심 해석
+        if p_value < 0.05:
+
+            if correlation > 0:
+                summary = (
+                    f"{exposure_label} 값이 큰 쪽에서 "
+                    "연 소득 5만 달러를 넘는 비율도 "
+                    "전반적으로 높은 방향의 관계가 나타났습니다."
+                )
+
+            elif correlation < 0:
+                summary = (
+                    f"{exposure_label} 값이 큰 쪽에서 "
+                    "연 소득 5만 달러를 넘는 비율은 "
+                    "전반적으로 낮은 방향의 관계가 나타났습니다."
+                )
+
+            else:
+                summary = (
+                    f"{exposure_label}와 연 소득 5만 달러 "
+                    "초과 여부 사이에서 뚜렷한 방향은 "
+                    "확인되지 않았습니다."
+                )
+
+        else:
+            summary = (
+                f"{exposure_label}와 연 소득 5만 달러 "
+                "초과 여부 사이에서 통계적으로 뚜렷한 "
+                "관계는 확인되지 않았습니다."
+            )
+
+        st.markdown(
+            f"**{summary}**"
+        )
+
+        st.caption(
+            "다른 조건을 따로 고려하지 않고 "
+            "현재 데이터에서 두 항목의 관계를 먼저 살펴본 결과입니다."
+        )
+
+        with st.expander(
+            "분석 상세 정보"
+        ):
+            detail_left, detail_right = (
+                st.columns(2)
+            )
+
+            with detail_left:
+                st.metric(
+                    "상관계수",
+                    f"{correlation:.3f}",
+                )
+
+            with detail_right:
+                st.metric(
+                    "p-value",
+                    _format_p_value(
+                        p_value
+                    ),
+                )
+
+            st.caption(
+                "분석 방법 · Point-biserial correlation"
+            )
+
+
+    # ========================================================
+    # 2. 이진형
+    # ========================================================
+
+    elif exposure_type == "binary":
+
+        metadata = unadjusted[
+            "exposure_metadata"
+        ]
+
+        reference = metadata[
+            "reference_level"
+        ]
+
+        comparison = metadata[
+            "comparison_level"
+        ]
+
+        reference_label = (
+            _result_value_label(
+                exposure,
+                reference,
+            )
+        )
+
+        comparison_label = (
+            _result_value_label(
+                exposure,
+                comparison,
+            )
+        )
+
+        reference_rate = float(
+            unadjusted[
+                "reference_rate"
+            ]
+        )
+
+        comparison_rate = float(
+            unadjusted[
+                "comparison_rate"
+            ]
+        )
+
+        rate_difference = float(
+            unadjusted[
+                "rate_difference"
+            ]
+        )
+
+        # 사용자용 핵심 해석
+        if rate_difference > 0:
+            summary = (
+                f"{comparison_label}에서 연 소득 5만 달러를 "
+                f"넘는 비율이 {reference_label}보다 "
+                f"{abs(rate_difference) * 100:.1f}%p 높게 나타났습니다."
+            )
+
+        elif rate_difference < 0:
+            summary = (
+                f"{comparison_label}에서 연 소득 5만 달러를 "
+                f"넘는 비율이 {reference_label}보다 "
+                f"{abs(rate_difference) * 100:.1f}%p 낮게 나타났습니다."
+            )
+
+        else:
+            summary = (
+                f"{reference_label}과 {comparison_label}의 "
+                "연 소득 5만 달러 초과 비율은 같게 나타났습니다."
+            )
+
+        st.markdown(
+            f"**{summary}**"
+        )
+
+        st.caption(
+            "두 그룹을 다른 조건의 차이를 고려하지 않고 "
+            "그대로 비교한 결과입니다."
+        )
+
+        col1, col2, col3 = (
+            st.columns(3)
+        )
 
         with col1:
             st.metric(
-                f"{reference} 고소득률",
+                reference_label,
                 _format_percent(
-                    unadjusted[
-                        "reference_rate"
-                    ]
+                    reference_rate
                 ),
             )
 
         with col2:
             st.metric(
-                f"{comparison} 고소득률",
-                _format_percent(unadjusted["comparison_rate"]),
+                comparison_label,
+                _format_percent(
+                    comparison_rate
+                ),
             )
 
         with col3:
             st.metric(
-                "고소득률 차이",
-                (f"{unadjusted['rate_difference'] * 100:+.2f}%p"),
+                "두 그룹의 차이",
+                (
+                    f"{rate_difference * 100:+.2f}%p"
+                ),
             )
 
-        table = pd.DataFrame(
-            [
-                {
-                    "통계량": "Risk Ratio",
-                    "값": (unadjusted["risk_ratio"]),
-                },
-                {
-                    "통계량": "Odds Ratio",
-                    "값": (unadjusted["odds_ratio"]),
-                },
-                {
-                    "통계량": "OR 95% CI 하한",
-                    "값": (unadjusted["odds_ratio_ci_95_low"]),
-                },
-                {
-                    "통계량": "OR 95% CI 상한",
-                    "값": (unadjusted["odds_ratio_ci_95_high"]),
-                },
-                {
-                    "통계량": "Cohen's h",
-                    "값": (unadjusted["cohens_h"]),
-                },
-                {
-                    "통계량": "Fisher exact p-value",
-                    "값": (unadjusted["fisher_exact_p_value"]),
-                },
+        # 기술 통계는 기본 화면에서 숨김
+        with st.expander(
+            "분석 상세 정보"
+        ):
+
+            detail_table = pd.DataFrame(
+                [
+                    {
+                        "통계 항목": "위험비 (Risk Ratio)",
+                        "값": unadjusted[
+                            "risk_ratio"
+                        ],
+                    },
+                    {
+                        "통계 항목": "오즈비 (Odds Ratio)",
+                        "값": unadjusted[
+                            "odds_ratio"
+                        ],
+                    },
+                    {
+                        "통계 항목": "오즈비 95% 신뢰구간 하한",
+                        "값": unadjusted[
+                            "odds_ratio_ci_95_low"
+                        ],
+                    },
+                    {
+                        "통계 항목": "오즈비 95% 신뢰구간 상한",
+                        "값": unadjusted[
+                            "odds_ratio_ci_95_high"
+                        ],
+                    },
+                    {
+                        "통계 항목": "Cohen's h",
+                        "값": unadjusted[
+                            "cohens_h"
+                        ],
+                    },
+                ]
+            )
+
+            st.dataframe(
+                detail_table,
+                width="stretch",
+                hide_index=True,
+            )
+
+            st.write(
+                "Fisher exact test p-value · "
+                f"{_format_p_value(unadjusted['fisher_exact_p_value'])}"
+            )
+
+
+    # ========================================================
+    # 3. 범주형
+    # ========================================================
+
+    elif exposure_type == "categorical":
+
+        p_value = float(
+            unadjusted[
+                "chi2_p_value"
             ]
         )
 
-        st.dataframe(
-            table,
-            width="stretch",
-            hide_index=True,
+        groups = pd.DataFrame(
+            unadjusted["groups"]
         )
 
-    elif exposure_type == "continuous":
-        col1, col2 = (st.columns(2))
+        # 가장 높은 범주 / 가장 낮은 범주
+        highest = groups.loc[
+            groups["target_rate"].idxmax()
+        ]
 
-        with col1:
-            st.metric(
-                "Point-biserial correlation",
-                (f"{unadjusted['correlation']:.4f}"),
+        lowest = groups.loc[
+            groups["target_rate"].idxmin()
+        ]
+
+        highest_label = (
+            _result_value_label(
+                exposure,
+                highest[exposure],
+            )
+        )
+
+        lowest_label = (
+            _result_value_label(
+                exposure,
+                lowest[exposure],
+            )
+        )
+
+        highest_rate = float(
+            highest["target_rate"]
+        )
+
+        lowest_rate = float(
+            lowest["target_rate"]
+        )
+
+        # 사용자용 핵심 해석
+        if p_value < 0.05:
+            summary = (
+                f"{exposure_label}에 따라 연 소득 5만 달러를 "
+                "넘는 비율에 차이가 나타났습니다. "
+                f"가장 높은 범주는 {highest_label}"
+                f"({_format_percent(highest_rate)}), "
+                f"가장 낮은 범주는 {lowest_label}"
+                f"({_format_percent(lowest_rate)})입니다."
             )
 
-        with col2:
-            st.metric(
-                "p-value",
-                _format_p_value(unadjusted["p_value"]),
+        else:
+            summary = (
+                f"{exposure_label}별 고소득 비율에는 차이가 보이지만, "
+                "통계적으로 뚜렷한 차이라고 판단할 근거는 "
+                "충분하지 않았습니다."
             )
+
+        st.markdown(
+            f"**{summary}**"
+        )
 
         st.caption(
-            "고소득 여부(0/1)와 연속형 관심 변수 사이의 "
-            "조정 전 연관성을 나타냅니다."
+            "각 그룹을 다른 조건의 차이를 고려하지 않고 "
+            "그대로 비교한 결과입니다."
         )
 
-    elif exposure_type == "categorical":
-        col1, col2, col3 = (st.columns(3))
+        # 사용자용 범주별 표
+        user_table = groups.copy()
 
-        with col1:
-            st.metric(
-                "Chi-square",
-                (f"{unadjusted['chi2_statistic']:.3f}"),
+        user_table[
+            exposure
+        ] = user_table[
+            exposure
+        ].map(
+            lambda value: (
+                _result_value_label(
+                    exposure,
+                    value,
+                )
             )
+        )
 
-        with col2:
-            st.metric(
-                "p-value",
-                _format_p_value(unadjusted["chi2_p_value"]),
+        user_table[
+            "연 소득 5만 달러 초과 비율"
+        ] = (
+            user_table[
+                "target_rate"
+            ]
+            .map(
+                lambda value: (
+                    f"{value * 100:.2f}%"
+                )
             )
+        )
 
-        with col3:
-            st.metric(
-                "자유도",
-                unadjusted["degrees_of_freedom"],
+        user_table = (
+            user_table[
+                [
+                    exposure,
+                    "n",
+                    "연 소득 5만 달러 초과 비율",
+                ]
+            ]
+            .rename(
+                columns={
+                    exposure: exposure_label,
+                    "n": "데이터 수",
+                }
             )
-
-        group_table = pd.DataFrame(unadjusted["groups"])
-
-        group_table["고소득률 (%)"] = (group_table["target_rate"]* 100)
-
-        group_table = (
-            group_table
-            .drop(columns=["target_rate",])
-            .rename(columns={"n": "표본 수",})
         )
 
         st.dataframe(
-            group_table,
+            user_table,
             width="stretch",
             hide_index=True,
         )
 
-
-# ============================================================
-# Logistic Regression 결과
-# ============================================================
-
-def display_adjusted_result(
-    result: dict,
-) -> None:
-    """조정된 관심 변수 Odds Ratio 결과를 표시한다."""
-
-    adjusted = (result["analysis"]["adjusted"])
-
-    effects = (
-        adjusted[
-            "exposure_effects"
-        ]
-    )
-
-    overall_test = adjusted.get(
-        "overall_test"
-    )
-
-    if (
-        isinstance(
-            overall_test,
-            dict,
-        )
-    ):
-        st.markdown(
-            "##### 관심 변수 전체 효과"
-        )
-
-        if overall_test.get(
-            "estimable",
-            False,
+        # 통계 검정은 상세 정보로 이동
+        with st.expander(
+            "분석 상세 정보"
         ):
+
             col1, col2, col3 = (
                 st.columns(3)
             )
 
             with col1:
                 st.metric(
-                    "Wald χ²",
+                    "Chi-square",
                     (
-                        f"{overall_test['statistic']:.3f}"
+                        f"{unadjusted['chi2_statistic']:.3f}"
                     ),
                 )
 
             with col2:
                 st.metric(
-                    "자유도",
-                    overall_test[
-                        "degrees_of_freedom"
-                    ],
+                    "p-value",
+                    _format_p_value(
+                        p_value
+                    ),
                 )
 
             with col3:
                 st.metric(
-                    "Overall p-value",
-                    _format_p_value(
-                        overall_test[
-                            "p_value"
-                        ]
-                    ),
+                    "자유도",
+                    unadjusted[
+                        "degrees_of_freedom"
+                    ],
+                )
+
+            expected_cells = (
+                unadjusted.get(
+                    "expected_cells_under_5",
+                    0,
+                )
+            )
+
+            if expected_cells > 0:
+                st.warning(
+                    "기대 빈도가 5보다 작은 셀이 있어 "
+                    "Chi-square 결과 해석에 주의가 필요합니다."
                 )
 
             st.caption(
-                "범주형 관심 변수의 모든 범주 효과를 "
-                "동시에 검정한 결과입니다. "
-                "귀무가설은 기준 범주 대비 모든 범주의 "
-                "회귀계수가 동시에 0이라는 것입니다."
+                "분석 방법 · Chi-square test"
             )
+
+# ============================================================
+# Logistic Regression 결과
+# ============================================================
+
+# ============================================================
+# 다른 조건을 함께 고려한 결과
+# ============================================================
+
+# ============================================================
+# 다른 조건을 함께 고려한 결과
+# ============================================================
+
+def display_adjusted_result(
+    result: dict,
+) -> None:
+    """통제 조건을 고려한 결과를 사용자 친화적으로 표시한다."""
+
+    request = result["request"]
+    analysis = result["analysis"]
+    adjusted = analysis["adjusted"]
+
+    exposure = request["exposure"]
+    exposure_type = analysis["exposure_type"]
+
+    exposure_label = VARIABLE_LABELS.get(
+        exposure,
+        exposure,
+    )
+
+    controls = list(
+        request.get(
+            "controls",
+            [],
+        )
+    )
+
+    effects = adjusted.get(
+        "exposure_effects",
+        [],
+    )
+
+    overall_test = adjusted.get(
+        "overall_test"
+    )
+
+    # --------------------------------------------------------
+    # 적용된 통제 조건 설명
+    # --------------------------------------------------------
+
+    if controls:
+        control_labels = [
+            VARIABLE_LABELS.get(
+                control,
+                control,
+            )
+            for control in controls
+        ]
+
+        st.caption(
+            f"{', '.join(control_labels)}의 차이를 "
+            "함께 고려한 결과입니다."
+        )
+
+    else:
+        st.caption(
+            "다른 조건을 추가로 고려하지 않고 "
+            "통계 모델로 관계를 다시 확인한 결과입니다."
+        )
+
+    # ========================================================
+    # 1. 연속형
+    # ========================================================
+
+    if exposure_type == "continuous":
+
+        if not effects:
+            st.warning(
+                "현재 데이터에서는 관계를 "
+                "안정적으로 확인하기 어렵습니다."
+            )
+            return
+
+        effect = effects[0]
+
+        if not effect.get(
+            "estimable",
+            True,
+        ):
+            st.warning(
+                "현재 데이터에서는 관계를 "
+                "안정적으로 확인하기 어렵습니다."
+            )
+            return
+
+        coefficient = float(
+            effect["coefficient"]
+        )
+
+        p_value = float(
+            effect["p_value"]
+        )
+
+        if p_value < 0.05:
+
+            if coefficient > 0:
+                summary = (
+                    f"{exposure_label} 값이 높을수록 "
+                    "연 소득 5만 달러를 넘는 경우가 "
+                    "더 많이 나타나는 관계가 확인되었습니다."
+                )
+
+            elif coefficient < 0:
+                summary = (
+                    f"{exposure_label} 값이 높을수록 "
+                    "연 소득 5만 달러를 넘는 경우가 "
+                    "적게 나타나는 관계가 확인되었습니다."
+                )
+
+            else:
+                summary = (
+                    f"{exposure_label}와 연 소득 5만 달러 "
+                    "초과 여부 사이에서 뚜렷한 방향은 "
+                    "확인되지 않았습니다."
+                )
+
+        else:
+            summary = (
+                f"{exposure_label}와 연 소득 5만 달러 "
+                "초과 여부 사이에서 통계적으로 "
+                "뚜렷한 관계는 확인되지 않았습니다."
+            )
+
+        st.markdown(
+            f"**{summary}**"
+        )
+
+        with st.expander(
+            "분석 상세 정보"
+        ):
+            st.metric(
+                "p-value",
+                _format_p_value(
+                    p_value
+                ),
+            )
+
+            st.caption(
+                "분석 방법 · Logistic Regression"
+            )
+
+    # ========================================================
+    # 2. 이진형
+    # ========================================================
+
+    elif exposure_type == "binary":
+
+        if not effects:
+            st.warning(
+                "현재 데이터에서는 두 그룹의 관계를 "
+                "안정적으로 확인하기 어렵습니다."
+            )
+            return
+
+        effect = effects[0]
+
+        if not effect.get(
+            "estimable",
+            True,
+        ):
+            st.warning(
+                "현재 데이터에서는 두 그룹의 관계를 "
+                "안정적으로 확인하기 어렵습니다."
+            )
+            return
+
+        metadata = adjusted.get(
+            "exposure_metadata",
+            {},
+        )
+
+        reference = metadata.get(
+            "reference_level"
+        )
+
+        comparison = metadata.get(
+            "comparison_level"
+        )
+
+        # 앞에서 만든 한글(영어) 표시 함수 재사용
+        reference_label = (
+            _category_value_label(
+                exposure,
+                reference,
+            )
+        )
+
+        comparison_label = (
+            _category_value_label(
+                exposure,
+                comparison,
+            )
+        )
+
+        coefficient = float(
+            effect["coefficient"]
+        )
+
+        p_value = float(
+            effect["p_value"]
+        )
+
+        if p_value < 0.05:
+
+            if coefficient > 0:
+                summary = (
+                    f"{comparison_label}에서 "
+                    f"{reference_label}보다 연 소득 5만 달러를 "
+                    "넘는 경우가 더 많이 나타나는 "
+                    "관계가 확인되었습니다."
+                )
+
+            elif coefficient < 0:
+                summary = (
+                    f"{comparison_label}에서 "
+                    f"{reference_label}보다 연 소득 5만 달러를 "
+                    "넘는 경우가 적게 나타나는 "
+                    "관계가 확인되었습니다."
+                )
+
+            else:
+                summary = (
+                    f"{reference_label}과 "
+                    f"{comparison_label} 사이에서 "
+                    "뚜렷한 차이는 확인되지 않았습니다."
+                )
+
+        else:
+            summary = (
+                f"{reference_label}과 "
+                f"{comparison_label} 사이에서 "
+                "통계적으로 뚜렷한 차이는 "
+                "확인되지 않았습니다."
+            )
+
+        st.markdown(
+            f"**{summary}**"
+        )
+
+        with st.expander(
+            "분석 상세 정보"
+        ):
+            st.metric(
+                "p-value",
+                _format_p_value(
+                    p_value
+                ),
+            )
+
+            st.caption(
+                "분석 방법 · Logistic Regression"
+            )
+
+    # ========================================================
+    # 3. 범주형
+    # ========================================================
+
+    elif exposure_type == "categorical":
+
+        if (
+            isinstance(
+                overall_test,
+                dict,
+            )
+            and overall_test.get(
+                "estimable",
+                False,
+            )
+        ):
+
+            p_value = float(
+                overall_test["p_value"]
+            )
+
+            if p_value < 0.05:
+                summary = (
+                    f"{exposure_label}에 따라 "
+                    "연 소득 5만 달러 초과 여부에 "
+                    "통계적으로 뚜렷한 차이가 "
+                    "확인되었습니다."
+                )
+
+            else:
+                summary = (
+                    f"{exposure_label} 전체를 살펴봤을 때 "
+                    "연 소득 5만 달러 초과 여부와의 "
+                    "통계적으로 뚜렷한 관계는 "
+                    "확인되지 않았습니다."
+                )
+
+            st.markdown(
+                f"**{summary}**"
+            )
+
+            with st.expander(
+                "분석 상세 정보"
+            ):
+                detail_left, detail_right = (
+                    st.columns(2)
+                )
+
+                with detail_left:
+                    st.metric(
+                        "p-value",
+                        _format_p_value(
+                            p_value
+                        ),
+                    )
+
+                with detail_right:
+                    st.metric(
+                        "자유도",
+                        overall_test[
+                            "degrees_of_freedom"
+                        ],
+                    )
+
+                st.caption(
+                    "분석 방법 · Logistic Regression "
+                    "전체 범주 검정"
+                )
 
         else:
             st.warning(
-                overall_test.get(
-                    "warning",
-                    (
-                        "관심 변수 전체 효과를 "
-                        "검정하지 못했습니다."
-                    ),
-                )
+                "현재 데이터에서는 이 항목 전체의 관계를 "
+                "안정적으로 확인하기 어렵습니다."
             )
 
-        st.write("")
-
-    rows: list[dict] = []
-
-    for effect in effects:
-        estimable = effect.get(
-            "estimable",
-            True,
-        )
-
-        rows.append(
-            {
-                "항목": effect[
-                    "term"
-                ],
-                "Adjusted OR": (
-                    effect[
-                        "odds_ratio"
-                    ]
-                    if estimable
-                    else None
-                ),
-                "95% CI 하한": (
-                    effect[
-                        "ci_95_low"
-                    ]
-                    if estimable
-                    else None
-                ),
-                "95% CI 상한": (
-                    effect[
-                        "ci_95_high"
-                    ]
-                    if estimable
-                    else None
-                ),
-                "p-value": (
-                    effect[
-                        "p_value"
-                    ]
-                ),
-                "추정 가능": (
-                    "예"
-                    if estimable
-                    else "아니오"
-                ),
-            }
-        )
-
-    st.dataframe(
-        pd.DataFrame(
-            rows
-        ),
-        width="stretch",
-        hide_index=True,
-    )
+    # ========================================================
+    # 공통 추정 경고
+    # ========================================================
 
     warnings = adjusted.get(
         "estimation_warnings",
@@ -603,42 +1303,6 @@ def display_adjusted_result(
         st.warning(
             warning
         )
-
-    diagnostics = adjusted[
-        "model_diagnostics"
-    ]
-
-    with st.expander(
-        "Logistic Regression 모델 진단"
-    ):
-        col1, col2, col3 = (
-            st.columns(3)
-        )
-
-        with col1:
-            st.metric(
-                "분석 표본",
-                diagnostics[
-                    "n_observations"
-                ],
-            )
-
-        with col2:
-            st.metric(
-                "Pseudo R²",
-                (
-                    f"{diagnostics['pseudo_r_squared']:.4f}"
-                ),
-            )
-
-        with col3:
-            st.metric(
-                "AIC",
-                (
-                    f"{diagnostics['aic']:.2f}"
-                ),
-            )
-
 
 # ============================================================
 # PSM 결과
@@ -784,40 +1448,44 @@ def association_page(
     """사용자 선택형 고소득 연관성 분석 UI."""
 
     st.header(
-        "연관성 분석"
+        "소득과의 관계"
     )
 
     st.markdown(
         """
         <div class="section-description">
-            하나의 관심 변수를 선택하고, 필요한 경우 통제 변수를 추가하여
-            고소득 여부와의 조정 전·후 연관성을 비교합니다.
+            궁금한 항목을 하나 골라 연 소득 5만 달러를 넘는 경우와
+            어떤 관계가 있는지 살펴보세요.<br>
+            다른 조건도 함께 선택하면 그 차이까지 고려해서 비교할 수 있어요.
         </div>
         """,
         unsafe_allow_html=True,
     )
-
 
     settings_col, question_col = st.columns(
         [0.9, 1.4],
         gap="large",
     )
 
-
     with settings_col:
         with st.container(
             border=True
         ):
             st.subheader(
-                "분석 설정"
+                "무엇을 살펴볼까요?"
             )
 
             exposure = st.selectbox(
-                "관심 변수",
+                "궁금한 항목",
                 options=list(
                     ANALYSIS_VARIABLES
                 ),
-                format_func=_variable_label,
+                format_func=lambda variable: (
+                    VARIABLE_LABELS.get(
+                        variable,
+                        variable,
+                    )
+                ),
                 key="association_exposure",
             )
 
@@ -825,11 +1493,6 @@ def association_page(
                 ANALYSIS_VARIABLE_TYPES[
                     exposure
                 ]
-            )
-
-            st.caption(
-                "변수 유형 · "
-                f"{VARIABLE_TYPE_LABELS[exposure_type]}"
             )
 
             control_options = [
@@ -840,13 +1503,22 @@ def association_page(
             ]
 
             controls = st.multiselect(
-                "통제 변수",
+                "함께 고려할 항목",
                 options=control_options,
-                format_func=_variable_label,
+                format_func=lambda variable: (
+                    VARIABLE_LABELS.get(
+                        variable,
+                        variable,
+                    )
+                ),
                 key="association_controls",
                 placeholder=(
-                    "조정할 변수를 선택하세요"
+                    "추가로 고려할 항목을 골라주세요"
                 ),
+            )
+
+            st.caption(
+                "선택하지 않아도 돼요."
             )
 
             psm_available = (
@@ -858,11 +1530,11 @@ def association_page(
 
             if psm_available:
                 include_psm = st.toggle(
-                    "PSM 추가 분석",
+                    "비슷한 조건끼리 추가로 비교하기",
                     value=False,
                     help=(
-                        "선택한 통제 변수의 분포를 "
-                        "성향점수매칭으로 추가 조정합니다."
+                        "선택한 조건이 비슷한 사람끼리 묶어서 "
+                        "차이를 한 번 더 비교합니다."
                     ),
                 )
 
@@ -870,7 +1542,7 @@ def association_page(
                 include_psm = False
 
             analyze_button = st.button(
-                "분석 실행",
+                "결과 보기",
                 type="primary",
                 width="stretch",
             )
@@ -889,22 +1561,59 @@ def association_page(
             for control in controls
         ]
 
+        # --------------------------------------------------------
+        # 사용자에게 보여줄 질문
+        # --------------------------------------------------------
+
         if control_labels:
             controls_text = ", ".join(
                 control_labels
             )
 
             question = (
-                f"선택한 통제 변수({controls_text})를 고려한 뒤에도 "
-                f"{exposure_label}과 고소득 여부 사이의 "
-                "연관성이 나타나는가?"
+                f"{controls_text}도 함께 고려했을 때, "
+                f"{exposure_label}에 따라 연 소득 5만 달러를 "
+                "넘을 가능성이 달라질까요?"
+            )
+
+            description = (
+                "선택한 조건들의 차이를 함께 고려해서 "
+                f"{exposure_label}와 소득의 관계를 살펴봐요."
             )
 
         else:
-            question = (
-                f"{exposure_label}과 고소득 여부 사이에는 "
-                "어떤 연관성이 있는가?"
-            )
+            if exposure_type == "continuous":
+                question = (
+                    f"{exposure_label}에 따라 연 소득 5만 달러를 "
+                    "넘는 비율이 어떻게 달라질까요?"
+                )
+
+                description = (
+                    "실제 데이터에서 값이 달라질수록 "
+                    "소득 수준에도 차이가 나타나는지 살펴봐요."
+                )
+
+            elif exposure_type == "binary":
+                question = (
+                    f"{exposure_label}에 따라 연 소득 5만 달러를 "
+                    "넘는 비율이 다를까요?"
+                )
+
+                description = (
+                    "두 그룹에서 연 소득 5만 달러를 넘는 "
+                    "비율에 차이가 있는지 비교해요."
+                )
+
+            else:
+                question = (
+                    f"{exposure_label}에 따라 연 소득 5만 달러를 "
+                    "넘는 비율이 어떻게 다를까요?"
+                )
+
+                description = (
+                    "각 그룹에서 연 소득 5만 달러를 넘는 "
+                    "비율이 어떻게 다른지 비교해요."
+                )
 
         with st.container(
             border=True
@@ -912,7 +1621,7 @@ def association_page(
             st.markdown(
                 """
                 <div class="section-number">
-                    CURRENT QUESTION
+                    지금 살펴볼 내용
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -924,25 +1633,10 @@ def association_page(
 
             st.write("")
 
-            if exposure_type == "continuous":
-                st.caption(
-                    "조정 전에는 연속형 변수와 고소득 여부의 "
-                    "관계를 확인하고, 조정 후에는 Logistic Regression의 "
-                    "Odds Ratio를 확인합니다."
-                )
+            st.caption(
+                description
+            )
 
-            elif exposure_type == "binary":
-                st.caption(
-                    "두 집단의 고소득률을 비교한 뒤 "
-                    "Logistic Regression으로 통제 변수를 조정합니다."
-                )
-
-            else:
-                st.caption(
-                    "범주별 고소득률을 비교한 뒤 "
-                    "관심 변수 전체의 조정 후 연관성을 검정하고, "
-                    "각 범주와 기준 범주의 Adjusted Odds Ratio를 확인합니다."
-                )
     if analyze_button:
         request = AnalysisRequest(
             exposure=exposure,
@@ -1003,150 +1697,270 @@ def association_page(
     ):
         return
 
-    request_result = result[
-        "request"
-    ]
+    request_result = result["request"]
+    analysis = result["analysis"]
 
-    analysis = result[
-        "analysis"
-    ]
-
-    st.markdown("#### 분석 방법")
-
-    if exposure_type == "continuous":
-        st.caption(
-            "조정 전: Point-biserial correlation · "
-            "조정 후: Logistic Regression"
+    # 마지막으로 '결과 보기'를 눌렀을 때 실제 적용된 조건
+    applied_controls = list(
+        request_result.get(
+            "controls",
+            [],
         )
+    )
 
-    elif exposure_type == "binary":
-        st.caption(
-            "조정 전: 집단별 고소득률 비교 · "
-            "조정 후: Logistic Regression"
-        )
+    analysis_rows = int(
+        analysis["sample_size"]
+    )
+
+    excluded_rows = int(
+        analysis[
+            "rows_excluded_due_to_missing"
+        ]
+    )
+
+    control_text = (
+        "없음"
+        if not applied_controls
+        else f"{len(applied_controls)}개"
+    )
+
+
+    # 결과 영역 상단 여백
+    st.markdown(
+        '<div class="result-top-spacer"></div>',
+        unsafe_allow_html=True,
+    )
+
+
+    if excluded_rows == 0:
+        metric_left, metric_right = st.columns(2)
+
+        with metric_left:
+            st.metric(
+                "분석에 사용한 데이터",
+                f"{analysis_rows:,}명",
+                border=True,
+            )
+
+        with metric_right:
+            st.metric(
+                "함께 고려한 항목",
+                control_text,
+                border=True,
+            )
 
     else:
-        st.caption(
-            "조정 전: 범주별 고소득률 + Chi-square · "
-            "조정 후: Overall Wald Test + Adjusted Odds Ratio"
+        metric_left, metric_center, metric_right = (
+            st.columns(3)
         )
 
-    st.divider()
-
-    col1, col2, col3 = st.columns(
-        3
-    )
-
-    with col1:
-        st.metric(
-            "분석 표본",
-            f"{analysis['sample_size']:,}",
-            border=True,
-        )
-
-    with col2:
-        st.metric(
-            "제외된 행",
-            f"{analysis['rows_excluded_due_to_missing']:,}",
-            border=True,
-        )
-
-    with col3:
-        st.metric(
-            "통제 변수",
-            f"{len(request_result['controls'])}개",
-            border=True,
-        )
-
-    selected_controls = (
-        ", ".join(
-            _variable_label(
-                control
+        with metric_left:
+            st.metric(
+                "분석에 사용한 데이터",
+                f"{analysis_rows:,}명",
+                border=True,
             )
-            for control
-            in request_result[
-                "controls"
-            ]
-        )
-        if request_result[
-            "controls"
-        ]
-        else "없음"
-    )
 
-    st.caption(
-        "관심 변수: "
-        f"{_variable_label(request_result['exposure'])} · "
-        "통제 변수: "
-        f"{selected_controls}"
-    )
+        with metric_center:
+            st.metric(
+                "제외된 데이터",
+                f"{excluded_rows:,}명",
+                border=True,
+            )
 
+        with metric_right:
+            st.metric(
+                "함께 고려한 항목",
+                control_text,
+                border=True,
+            )
+    
     # --------------------------------------------------------
     # 조정 전
     # --------------------------------------------------------
 
+    executed_exposure = request_result[
+        "exposure"
+    ]
+
+    executed_exposure_type = analysis[
+        "exposure_type"
+    ]
+
+    executed_exposure_label = (
+        VARIABLE_LABELS.get(
+            executed_exposure,
+            executed_exposure,
+        )
+    )
+
+
     st.markdown(
-        '<div class="section-number">'
-        '01 · UNADJUSTED'
-        '</div>',
+        """
+        <div class="section-number">
+            01 · 데이터에서 보이는 관계
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
     st.subheader(
-        "조정 전 연관성"
+        f"{executed_exposure_label}와 소득의 관계"
     )
 
     display_unadjusted_result(
         result
     )
 
-    st.plotly_chart(
-        figures[
-            "unadjusted"
-        ],
-        width="stretch",
-    )
-
     # --------------------------------------------------------
     # 조정 후
     # --------------------------------------------------------
 
-    st.markdown(
-        '<div class="section-number">'
-        '02 · ADJUSTED'
-        '</div>',
-        unsafe_allow_html=True,
+    # --------------------------------------------------------
+    # 다른 조건을 함께 고려한 결과
+    # --------------------------------------------------------
+
+    applied_exposure = (
+        request_result[
+            "exposure"
+        ]
     )
 
-    st.subheader(
-        "통제 변수 조정 후 연관성"
+    applied_controls = list(
+        request_result.get(
+            "controls",
+            [],
+        )
     )
+
+    applied_exposure_label = (
+        VARIABLE_LABELS.get(
+            applied_exposure,
+            applied_exposure,
+        )
+    )
+
+
+    if applied_controls:
+
+        st.markdown(
+            """
+            <div class="section-number">
+                02 · 다른 조건을 함께 고려한 결과
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.subheader(
+            f"{applied_exposure_label}와 소득의 관계가 "
+            "다른 조건을 고려해도 나타날까요?"
+        )
+
+    else:
+
+        st.markdown(
+            """
+            <div class="section-number">
+                02 · 통계 모델로 다시 확인한 결과
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.subheader(
+            f"{applied_exposure_label}와 소득의 관계를 "
+            "모델로 다시 확인해봤어요."
+        )
+
 
     display_adjusted_result(
         result
     )
 
-    st.plotly_chart(
-        figures[
-            "adjusted"
-        ],
-        width="stretch",
+# --------------------------------------------------------
+# 예상 비율
+# --------------------------------------------------------
+
+    applied_exposure = (
+        request_result[
+            "exposure"
+        ]
     )
 
-    st.markdown(
-        '<div class="section-number">'
-        '03 · ADJUSTED PROBABILITY'
-        '</div>',
-        unsafe_allow_html=True,
+    applied_controls = list(
+        request_result.get(
+            "controls",
+            [],
+        )
     )
 
-    st.subheader("조정 고소득 확률")
-
-    st.caption(
-        "통제 변수의 실제 관측값은 유지한 채 "
-        "관심 변수의 값만 동일하게 설정하여 계산한 "
-        "평균 모형 예측확률입니다."
+    applied_exposure_label = (
+        VARIABLE_LABELS.get(
+            applied_exposure,
+            applied_exposure,
+        )
     )
+
+
+    if applied_controls:
+
+        st.markdown(
+            """
+            <div class="section-number">
+                03 · 조건을 고려한 예상 비율
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    else:
+
+        st.markdown(
+            """
+            <div class="section-number">
+                03 · 모델이 계산한 예상 비율
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+    st.subheader(
+        f"{applied_exposure_label}에 따라 "
+        "예상 비율이 어떻게 달라질까요?"
+    )
+
+
+    if applied_controls:
+
+        control_labels = [
+            VARIABLE_LABELS.get(
+                control,
+                control,
+            )
+            for control
+            in applied_controls
+        ]
+
+        controls_text = ", ".join(
+            control_labels
+        )
+
+        st.caption(
+            f"{controls_text}의 차이를 함께 고려했을 때, "
+            f"{applied_exposure_label}에 따른 "
+            "연 소득 5만 달러 초과 예상 비율을 보여줍니다."
+        )
+
+    else:
+
+        st.caption(
+            "다른 조건을 추가로 고려하지 않은 상태에서, "
+            f"{applied_exposure_label}에 따른 "
+            "연 소득 5만 달러 초과 예상 비율을 보여줍니다."
+        )
+
 
     if (
         "adjusted_probability"
@@ -1157,13 +1971,6 @@ def association_page(
                 "adjusted_probability"
             ],
             width="stretch",
-        )
-    if not request_result[
-        "controls"
-    ]:
-        st.info(
-            "통제 변수를 선택하지 않았으므로 "
-            "이 Logistic Regression 결과에는 추가 조정 변수가 없습니다."
         )
 
     # --------------------------------------------------------
@@ -1209,11 +2016,26 @@ def association_page(
             ]
         )
 
-    _display_interpretation_note(
-        result[
-            "interpretation_note"
-        ]
+    st.markdown(
+        "#### 결과를 볼 때 참고해주세요"
     )
+
+    if request_result.get(
+        "include_psm",
+        False,
+    ):
+        st.caption(
+            "비슷한 조건의 사람끼리 추가로 비교했지만, "
+            "데이터에 포함되지 않은 다른 차이까지 모두 고려할 수는 없습니다. "
+            "따라서 이 결과를 직접적인 원인과 결과로 해석해서는 안 됩니다."
+        )
+
+    else:
+        st.caption(
+            "이 결과는 데이터에서 함께 나타나는 관계를 보여줍니다. "
+            "다른 조건을 함께 고려했더라도 특정 항목이 "
+            "소득 차이의 직접적인 원인이라고 단정할 수는 없습니다."
+        )
 
 
 # ============================================================
@@ -1316,11 +2138,18 @@ def _categorical_input_widget(
         default_index = 0
 
     return st.selectbox(
-        _variable_label(
-            feature
+        VARIABLE_LABELS.get(
+            feature,
+            feature,
         ),
         options=levels,
         index=default_index,
+        format_func=lambda value: (
+            _category_value_label(
+                feature,
+                value,
+            )
+        ),
         key=(
             f"prediction_{feature}"
         ),
@@ -1335,17 +2164,17 @@ def prediction_page() -> None:
     """개별 입력의 고소득 예측과 모델 설명 UI."""
 
     st.header(
-        "고소득 예측"
+        "내 소득 예측"
     )
 
     st.write(
-        "개인의 조건을 입력하면 학습된 머신러닝 모델이 "
-        "연 소득 5만 달러 초과 확률을 예측합니다."
+        "내 정보를 입력하면 현재 모델이 "
+        "연 소득 5만 달러를 넘을 가능성을 보여드려요."
     )
 
     st.caption(
-        "이 기능은 통계적 연관성 분석과 별개입니다. "
-        "입력값은 실제 예측 조건으로 사용됩니다."
+        "입력한 정보는 예측에만 사용되며, "
+        "앞에서 살펴본 '소득과의 관계' 분석과는 별도로 계산됩니다."
     )
 
     try:
@@ -1419,14 +2248,14 @@ def prediction_page() -> None:
             st.markdown(
                 """
                 <div class="section-number">
-                    01 · PROFILE
+                    01 · 기본 정보
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
             st.subheader(
-                "기본 정보"
+                "나에 대한 정보"
             )
 
             left, right = (
@@ -1470,14 +2299,14 @@ def prediction_page() -> None:
             st.markdown(
                 """
                 <div class="section-number">
-                    02 · EDUCATION & WORK
+                    02 · 학력과 일
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
             st.subheader(
-                "교육 및 직업"
+                "학력과 직업 정보"
             )
 
             left, right = (
@@ -1513,14 +2342,19 @@ def prediction_page() -> None:
             st.markdown(
                 """
                 <div class="section-number">
-                    03 · CAPITAL
+                    03 · 추가 소득 정보
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
             st.subheader(
-                "자본 정보"
+                "투자·자산 거래에서 생긴 이익과 손실"
+            )
+
+            st.caption(
+                "월급이나 현재 보유한 자산을 입력하는 항목이 아닙니다. "
+                "해당하는 이익이나 손실이 없다면 0으로 입력하세요."
             )
 
             left, right = (
@@ -1532,9 +2366,19 @@ def prediction_page() -> None:
                     "capital-gain"
                 )
 
+                st.caption(
+                    "주식이나 자산 거래 등에서 발생한 이익입니다. "
+                    "해당 사항이 없다면 0으로 입력하세요."
+                )
+
             with right:
                 render_prediction_feature(
                     "capital-loss"
+                )
+
+                st.caption(
+                    "주식이나 자산 거래 등에서 발생한 손실입니다. "
+                    "해당 사항이 없다면 0으로 입력하세요."
                 )
                 
         st.write("")
@@ -1552,7 +2396,7 @@ def prediction_page() -> None:
         with button_center:
             predict_button = (
                 st.form_submit_button(
-                    "예측 실행",
+                    "결과 확인",
                     type="primary",
                     width="stretch",
                 )
@@ -1614,61 +2458,74 @@ def prediction_page() -> None:
     # 예측 결과
     # --------------------------------------------------------
 
+    probability = float(
+        prediction[
+            "high_income_probability"
+        ]
+    )
+
+    st.markdown(
+        """
+        <div class="section-number">
+            01 · 내 예측 결과
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.subheader(
-        "예측 결과"
+        "연 소득 5만 달러를 넘을 가능성"
     )
 
-    col1, col2 = (
-        st.columns(2)
+    st.metric(
+        label="예측 확률",
+        value=f"{probability * 100:.1f}%",
     )
 
-    with col1:
-        st.metric(
-            "예측 클래스",
-            prediction[
-                "prediction_label"
-            ],
+    if probability >= 0.5:
+        st.markdown(
+            "**현재 입력한 조건에서는 연 소득 5만 달러를 "
+            "넘을 가능성이 조금 더 높게 예측됐습니다.**"
         )
 
-    with col2:
-        st.metric(
-            "고소득 예측 확률",
-            (
-                f"{prediction['high_income_probability'] * 100:.2f}%"
-            ),
+    else:
+        st.markdown(
+            "**현재 입력한 조건에서는 연 소득 5만 달러 이하일 "
+            "가능성이 조금 더 높게 예측됐습니다.**"
         )
-
-    try:
-        probability_figure = (
-            plot_prediction_probability(
-                prediction_result
-            )
-        )
-
-        st.plotly_chart(
-            probability_figure,
-            width="stretch",
-        )
-
-    except VisualizationError as exc:
-        st.warning(
-            f"예측 확률 그래프를 표시하지 못했습니다: {exc}"
-        )
-
-    # --------------------------------------------------------
-    # 개인별 설명
-    # --------------------------------------------------------
-
-    st.subheader("개인 입력 기준 예측 설명")
 
     st.caption(
-        "각 변수의 현재 값을 학습 데이터의 대표값으로 "
-        "하나씩 변경했을 때 예측 확률이 얼마나 달라지는지 비교합니다."
+        "입력한 정보를 바탕으로 모델이 계산한 예측값이며, "
+        "실제 소득을 의미하지 않습니다."
+    )
+
+    # --------------------------------------------------------
+    # 내 입력값에 따른 예측 변화
+    # --------------------------------------------------------
+
+    st.markdown(
+        """
+        <div class="section-number">
+            02 · 내 입력값 살펴보기
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.subheader(
+        "어떤 입력값에서 예측이 달라졌을까요?"
+    )
+
+    st.caption(
+        "현재 입력한 값을 학습 데이터에서 자주 나타나는 대표적인 값으로 "
+        "하나씩 바꿔보면서 예측 확률이 얼마나 달라지는지 비교합니다."
     )
 
     try:
         explanation_figure = (
-            plot_prediction_explanation(prediction_result)
+            plot_prediction_explanation(
+                prediction_result
+            )
         )
 
         st.plotly_chart(
@@ -1677,10 +2534,15 @@ def prediction_page() -> None:
         )
 
     except VisualizationError as exc:
-        st.warning(f"개인 예측 설명 그래프를 표시하지 못했습니다: {exc}")
+        st.warning(
+            f"입력값 비교 그래프를 표시하지 못했습니다: {exc}"
+        )
 
-    _display_interpretation_note(
-        prediction_result["explanation"]["interpretation_note"]
+    st.caption(
+        "오른쪽으로 갈수록 현재 입력값에서 예측 확률이 더 높았고, "
+        "왼쪽으로 갈수록 더 낮았습니다. "
+        "각 항목은 현재 값을 학습 데이터의 대표적인 값으로 하나씩 "
+        "바꿔 비교한 결과이며, 원인과 결과를 의미하지 않습니다."
     )
 
     # --------------------------------------------------------
@@ -1783,7 +2645,6 @@ def prediction_page() -> None:
         prediction_result["interpretation_note"]
     )
 
-
 # ============================================================
 # 앱 실행
 # ============================================================
@@ -1837,16 +2698,18 @@ def render_hero() -> None:
     st.markdown(
         """
         <div class="hero-eyebrow">
-            SKALA · ADULT CENSUS INCOME
+            SKALA · 소득 데이터 탐색
         </div>
 
         <div class="hero-title">
-            고소득 연관성 분석 & 예측
+            소득이 높은 사람들은 어떤 점이 다를까요?
         </div>
 
         <div class="hero-description">
-            관심 변수와 통제 변수를 직접 선택해 고소득 여부와의 연관성을 탐색하고,
-            개인의 조건에 따른 머신러닝 예측 확률과 예측 근거를 확인합니다.
+            나이, 교육 수준, 직업 같은 조건에 따라
+            소득에 어떤 차이가 있는지 살펴보고,<br>
+            내 조건에서는 연 소득 5만 달러(약 7500만원)를 넘을 가능성이
+            얼마나 되는지도 확인해보세요.
         </div>
         """,
         unsafe_allow_html=True,
@@ -1866,24 +2729,79 @@ def main() -> None:
         )
         st.stop()
 
-    nav_left, nav_center, nav_right = st.columns([1, 3, 1])
+    # ============================================================
+    # 페이지 네비게이션
+    # ============================================================
+
+    if "service_mode" not in st.session_state:
+        st.session_state[
+            "service_mode"
+        ] = "소득과의 관계"
+
+
+    nav_left, nav_center, nav_right = st.columns(
+        [1, 3, 1]
+    )
 
     with nav_center:
-        mode = st.segmented_control(
-            "서비스 선택",
-            options=[
-                "연관성 분석",
-                "고소득 예측",
-            ],
-            default="연관성 분석",
-            label_visibility="collapsed",
-            width="stretch",
+        tab_left, tab_right = st.columns(
+            2,
+            gap="small",
         )
+
+        current_mode = st.session_state[
+            "service_mode"
+        ]
+
+        with tab_left:
+            association_clicked = st.button(
+                "소득과의 관계",
+                key="nav_association",
+                type=(
+                    "primary"
+                    if current_mode == "소득과의 관계"
+                    else "secondary"
+                ),
+                width="stretch",
+            )
+
+        with tab_right:
+            prediction_clicked = st.button(
+                "내 소득 예측",
+                key="nav_prediction",
+                type=(
+                    "primary"
+                    if current_mode == "내 소득 예측"
+                    else "secondary"
+                ),
+                width="stretch",
+            )
+
+        if association_clicked:
+            st.session_state[
+                "service_mode"
+            ] = "소득과의 관계"
+            st.rerun()
+
+        if prediction_clicked:
+            st.session_state[
+                "service_mode"
+            ] = "내 소득 예측"
+            st.rerun()
+
 
     st.divider()
 
-    if mode == "연관성 분석":
-        association_page(df)
+
+    if (
+        st.session_state[
+            "service_mode"
+        ]
+        == "소득과의 관계"
+    ):
+        association_page(
+            df
+        )
 
     else:
         prediction_page()

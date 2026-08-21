@@ -26,6 +26,100 @@ import plotly.graph_objects as go
 class VisualizationError(ValueError):
     """시각화 입력이나 결과 구조가 올바르지 않을 때 발생하는 오류."""
 
+# ============================================================
+# 사용자 표시용 라벨
+# ============================================================
+
+VARIABLE_LABELS = {
+    "age": "나이",
+    "workclass": "고용 형태",
+    "education": "교육 수준",
+    "marital-status": "혼인 상태",
+    "occupation": "직업",
+    "relationship": "가구 내 관계",
+    "race": "인종",
+    "sex": "성별",
+    "capital-gain": "투자·자산 이익",
+    "capital-loss": "투자·자산 손실",
+    "hours-per-week": "주당 근무시간",
+    "native-country": "출신 국가",
+}
+
+
+CATEGORY_VALUE_LABELS = {
+    "sex": {
+        "Male": "남성",
+        "Female": "여성",
+    },
+
+    "race": {
+        "White": "백인",
+        "Black": "흑인",
+        "Asian-Pac-Islander": "아시아·태평양계",
+        "Amer-Indian-Eskimo": "아메리카 원주민",
+        "Other": "기타",
+    },
+
+    "relationship": {
+        "Husband": "남편",
+        "Wife": "아내",
+        "Own-child": "자녀",
+        "Not-in-family": "가족 외",
+        "Other-relative": "기타 친족",
+        "Unmarried": "미혼·비혼",
+    },
+
+    "workclass": {
+        "Private": "민간 기업",
+        "Self-emp-not-inc": "자영업·비법인",
+        "Self-emp-inc": "자영업·법인",
+        "Federal-gov": "연방정부",
+        "Local-gov": "지방정부",
+        "State-gov": "주정부",
+        "Without-pay": "무급 근무",
+        "Never-worked": "근무 경험 없음",
+    },
+
+    "education": {
+        "Preschool": "취학 전",
+        "1st-4th": "초등 1~4학년",
+        "5th-6th": "초등 5~6학년",
+        "7th-8th": "중학교 수준",
+        "9th": "9학년",
+        "10th": "10학년",
+        "11th": "11학년",
+        "12th": "12학년",
+        "HS-grad": "고등학교 졸업",
+        "Some-college": "대학 일부 이수",
+        "Assoc-voc": "전문학사·직업 과정",
+        "Assoc-acdm": "전문학사·학술 과정",
+        "Bachelors": "학사",
+        "Masters": "석사",
+        "Prof-school": "전문대학원",
+        "Doctorate": "박사",
+    },
+}
+
+def _variable_label(
+    variable: str,
+) -> str:
+    return VARIABLE_LABELS.get(
+        variable,
+        variable,
+    )
+
+
+def _category_label(
+    variable: str,
+    value,
+) -> str:
+    """그래프에서는 한글만 표시한다."""
+
+    return (
+        CATEGORY_VALUE_LABELS
+        .get(variable, {})
+        .get(value, str(value))
+    )
 
 # ============================================================
 # 공통 검증
@@ -192,10 +286,23 @@ def plot_unadjusted_association(
                 ],
             }
         )
+   
+        chart_data[
+            "display_level"
+        ] = chart_data[
+            "level"
+        ].map(
+            lambda value: (
+                _category_label(
+                    exposure,
+                    value,
+                )
+            )
+        )
 
         figure = px.bar(
             chart_data,
-            x="level",
+            x="display_level",
             y="high_income_rate_percent",
             custom_data=[
                 "sample_size",
@@ -204,9 +311,13 @@ def plot_unadjusted_association(
                 f"{exposure}별 조정 전 고소득률"
             ),
             labels={
-                "level": exposure,
+                "display_level": (
+                    _variable_label(
+                        exposure
+                    )
+                ),
                 "high_income_rate_percent": (
-                    "고소득률 (%)"
+                    "연 소득 5만 달러 초과 비율 (%)"
                 ),
             },
         )
@@ -239,9 +350,22 @@ def plot_unadjusted_association(
             )
         )
 
+        chart_data[
+            "display_level"
+        ] = chart_data[
+            exposure
+        ].map(
+            lambda value: (
+                _category_label(
+                    exposure,
+                    value,
+                )
+            )
+        )
+
         figure = px.bar(
             chart_data,
-            x=exposure,
+            x="display_level",
             y="high_income_rate_percent",
             custom_data=[
                 "n",
@@ -255,6 +379,10 @@ def plot_unadjusted_association(
                     "고소득률 (%)"
                 ),
             },
+        )
+
+        figure.update_traces(
+            marker_color="#7C8B6F",
         )
 
     # --------------------------------------------------------
@@ -310,7 +438,19 @@ def plot_unadjusted_association(
                 "<br>고소득률: %{y:.2f}%"
                 "<br>표본 수: %{customdata[2]:,}"
                 "<extra></extra>"
-            )
+            ),
+            line={
+                "color": "#7C8B6F",
+                "width": 3,
+            },
+            marker={
+                "color": "#7C8B6F",
+                "size": 8,
+            },
+        )
+
+        figure.update_yaxes(
+            rangemode="tozero"
         )
 
         return figure
@@ -334,7 +474,10 @@ def plot_unadjusted_association(
         rangemode="tozero"
     )
 
-    return figure
+    return _apply_user_chart_theme(
+        figure,
+        height=420,
+    )
 
 
 # ============================================================
@@ -625,9 +768,6 @@ def plot_adjusted_association(
     )
 
     figure.update_layout(
-        title=(
-            f"{exposure}의 조정된 Odds Ratio"
-        ),
         xaxis_title=(
             "Adjusted Odds Ratio "
             "(log scale)"
@@ -645,27 +785,25 @@ def plot_adjusted_association(
 def plot_adjusted_probability(
     result: dict,
 ) -> go.Figure:
-    """관심 변수 값별 조정된 평균 고소득 확률을 표시한다."""
+    """관심 변수 값별 예상 고소득 비율을 표시한다."""
 
     _validate_association_result(
         result
     )
 
-    request = result[
-        "request"
-    ]
+    request = result["request"]
+    analysis = result["analysis"]
 
-    analysis = result[
-        "analysis"
-    ]
-
-    exposure = request[
-        "exposure"
-    ]
-
+    exposure = request["exposure"]
     exposure_type = analysis[
         "exposure_type"
     ]
+
+    exposure_label = (
+        _variable_label(
+            exposure
+        )
+    )
 
     adjusted = analysis[
         "adjusted"
@@ -682,17 +820,17 @@ def plot_adjusted_probability(
         dict,
     ):
         raise VisualizationError(
-            "조정 확률 결과가 없습니다."
+            "예상 비율 결과가 없습니다."
         )
 
     records = probability_result.get(
         "records",
-        []
+        [],
     )
 
     if not records:
         raise VisualizationError(
-            "시각화할 조정 확률이 없습니다."
+            "시각화할 예상 비율이 없습니다."
         )
 
     chart_data = pd.DataFrame(
@@ -700,7 +838,7 @@ def plot_adjusted_probability(
     )
 
     chart_data[
-        "adjusted_probability_percent"
+        "probability_percent"
     ] = (
         chart_data[
             "adjusted_probability"
@@ -708,7 +846,12 @@ def plot_adjusted_probability(
         * 100
     )
 
+    # ========================================================
+    # 연속형
+    # ========================================================
+
     if exposure_type == "continuous":
+
         chart_data[
             "exposure_value"
         ] = pd.to_numeric(
@@ -728,60 +871,91 @@ def plot_adjusted_probability(
         figure = px.line(
             chart_data,
             x="exposure_value",
-            y=(
-                "adjusted_probability_percent"
-            ),
+            y="probability_percent",
             markers=True,
-            title=(
-                f"{exposure}의 조정 고소득 확률"
-            ),
             labels={
                 "exposure_value": (
-                    exposure
+                    exposure_label
                 ),
-                "adjusted_probability_percent": (
-                    "조정 고소득 확률 (%)"
+                "probability_percent": (
+                    "연 소득 5만 달러 초과 예상 비율 (%)"
                 ),
             },
         )
 
+        figure.update_traces(
+            line={
+                "color": "#7C8B6F",
+                "width": 3,
+            },
+            marker={
+                "color": "#7C8B6F",
+                "size": 8,
+            },
+            hovertemplate=(
+                f"{exposure_label}: %{{x}}"
+                "<br>예상 비율: %{y:.1f}%"
+                "<extra></extra>"
+            ),
+        )
+
+    # ========================================================
+    # 이진형 / 범주형
+    # ========================================================
+
     else:
+
+        chart_data[
+            "display_value"
+        ] = chart_data[
+            "exposure_value"
+        ].map(
+            lambda value: (
+                _category_label(
+                    exposure,
+                    value,
+                )
+            )
+        )
+
         figure = px.bar(
             chart_data,
-            x="exposure_value",
-            y=(
-                "adjusted_probability_percent"
-            ),
-            title=(
-                f"{exposure}별 조정 고소득 확률"
-            ),
+            x="display_value",
+            y="probability_percent",
             labels={
-                "exposure_value": (
-                    exposure
+                "display_value": (
+                    exposure_label
                 ),
-                "adjusted_probability_percent": (
-                    "조정 고소득 확률 (%)"
+                "probability_percent": (
+                    "연 소득 5만 달러 초과 예상 비율 (%)"
                 ),
             },
+        )
+
+        figure.update_traces(
+            marker_color="#7C8B6F",
+            hovertemplate=(
+                f"{exposure_label}: %{{x}}"
+                "<br>예상 비율: %{y:.1f}%"
+                "<extra></extra>"
+            ),
         )
 
     figure.update_yaxes(
-        range=[
-            0,
-            100,
-        ]
+        range=[0, 100],
+        title=(
+            "연 소득 5만 달러 초과 예상 비율 (%)"
+        ),
     )
 
-    figure.update_traces(
-        hovertemplate=(
-            f"{exposure}: %{{x}}"
-            "<br>조정 고소득 확률: "
-            "%{y:.2f}%"
-            "<extra></extra>"
-        )
+    figure.update_xaxes(
+        title=exposure_label,
     )
 
-    return figure
+    return _apply_user_chart_theme(
+        figure,
+        height=430,
+    )
 
 # ============================================================
 # PSM 균형 시각화
@@ -898,9 +1072,6 @@ def plot_psm_balance(
     )
 
     figure.update_layout(
-        title=(
-            "PSM 매칭 전후 통제변수 균형"
-        ),
         xaxis_title=(
             "Absolute Standardized "
             "Mean Difference"
@@ -1078,15 +1249,15 @@ def plot_prediction_explanation(
     *,
     top_n: int = 8,
 ) -> go.Figure:
-    """현재 입력값과 대표값의 예측 확률 차이를 표시한다."""
+    """현재 입력값을 대표값으로 바꿨을 때의 예측 확률 변화를 표시한다."""
 
     explanation = result.get(
         "explanation",
-        {}
+        {},
     )
 
     features = explanation.get(
-        "features"
+        "features",
     )
 
     if not features:
@@ -1113,7 +1284,6 @@ def plot_prediction_explanation(
         features
     ).copy()
 
-    # 영향이 큰 순서대로 상위 항목 선택
     chart_data[
         "absolute_impact"
     ] = (
@@ -1139,44 +1309,49 @@ def plot_prediction_explanation(
     chart_data[
         "feature_label"
     ] = (
-        chart_data["feature"]
+        chart_data[
+            "feature"
+        ]
         .map(feature_labels)
         .fillna(
-            chart_data["feature"]
+            chart_data[
+                "feature"
+            ]
         )
     )
 
-    # 막대 끝에 표시할 값
+    # 작은 값은 소수점 자릿수를 늘려 표시
+    def format_impact(
+        value: float,
+    ) -> str:
+
+        if abs(value) < 0.001:
+            return "0.000%p"
+
+        if abs(value) < 0.01:
+            return f"{value:+.3f}%p"
+
+        return f"{value:+.2f}%p"
+
     chart_data[
         "impact_text"
     ] = chart_data[
         "impact_percentage_points"
     ].map(
-        lambda value: (
-            f"{value:+.2f}%p"
-        )
+        format_impact
     )
-
-    # --------------------------------------------------------
-    # 작은 값도 보이도록 x축 범위를 동적으로 설정
-    # --------------------------------------------------------
 
     max_abs_impact = float(
         chart_data[
-            "impact_percentage_points"
-        ]
-        .abs()
-        .max()
+            "absolute_impact"
+        ].max()
     )
 
-    if max_abs_impact < 0.01:
-        axis_limit = 0.05
-
-    else:
-        axis_limit = (
-            max_abs_impact
-            * 1.30
-        )
+    # x축이 지나치게 좁아지는 것을 방지
+    axis_limit = max(
+        max_abs_impact * 1.30,
+        0.01,
+    )
 
     figure = px.bar(
         chart_data,
@@ -1188,59 +1363,60 @@ def plot_prediction_explanation(
             "current_value",
             "reference_value",
         ],
-        title=(
-            "입력값을 바꿨을 때의 예측 변화"
-        ),
         labels={
             "feature_label": "",
             "impact_percentage_points": (
-                "예측 확률 차이 (%p)"
+                "대표적인 값과 비교한 예측 확률 차이 (%p)"
             ),
         },
     )
 
-    # 기준선
     figure.add_vline(
         x=0,
         line_dash="dash",
-    )
-
-    # 양수/음수가 균형 있게 보이도록 축 고정
-    figure.update_xaxes(
-        range=[
-            -axis_limit,
-            axis_limit,
-        ],
-        zeroline=False,
-        title=(
-            "대표적인 값과 비교한 예측 확률 차이 (%p)"
-        ),
-    )
-
-    figure.update_yaxes(
-        title=""
+        line_color="#2C2C2C",
     )
 
     figure.update_traces(
+        marker_color="#7C8B6F",
         textposition="outside",
         cliponaxis=False,
         hovertemplate=(
             "<b>%{y}</b>"
-            "<br>예측 확률 차이: %{x:+.2f}%p"
+            "<br>예측 확률 차이: %{x:+.3f}%p"
             "<br>현재 입력값: %{customdata[0]}"
             "<br>대표적인 값: %{customdata[1]}"
             "<extra></extra>"
         ),
     )
 
+    figure.update_xaxes(
+        range=[
+            -axis_limit,
+            axis_limit,
+        ],
+        title=(
+            "대표적인 값과 비교한 예측 확률 차이 (%p)"
+        ),
+        gridcolor="#E8E6E1",
+        zeroline=False,
+    )
+
+    figure.update_yaxes(
+        title="",
+        gridcolor="rgba(0,0,0,0)",
+    )
+
     figure.update_layout(
         showlegend=False,
-        height=430,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        height=400,
         margin={
             "l": 20,
             "r": 70,
-            "t": 70,
-            "b": 60,
+            "t": 10,
+            "b": 55,
         },
     )
 
@@ -1518,6 +1694,9 @@ def plot_global_feature_importance(
             y=chart_data[
                 "feature_label"
             ],
+            marker={
+                "color": "#7C8B6F",
+            },
             orientation="h",
             error_x={
                 "type": "data",
@@ -1535,12 +1714,6 @@ def plot_global_feature_importance(
     )
 
     figure.update_layout(
-        title=(
-            "전체 데이터에서 많이 활용된 정보"
-        ),
-        xaxis_title=(
-            "예측 중요도"
-        ),
         yaxis_title="",
         showlegend=False,
         height=500,
@@ -1549,6 +1722,67 @@ def plot_global_feature_importance(
             "r": 40,
             "t": 70,
             "b": 60,
+        },
+    )
+
+    return _apply_user_chart_theme(
+        figure,
+        height=460,
+    )
+
+def _apply_user_chart_theme(
+    figure: go.Figure,
+    *,
+    height: int = 420,
+) -> go.Figure:
+    """웹 서비스용 공통 Plotly 스타일."""
+
+    figure.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font={
+            "family": (
+                "Pretendard, Noto Sans KR, "
+                "Apple SD Gothic Neo, sans-serif"
+            ),
+            "color": "#4B4B4B",
+            "size": 13,
+        },
+        height=height,
+        margin={
+            "l": 30,
+            "r": 30,
+            "t": 20,
+            "b": 55,
+        },
+        showlegend=False,
+        hoverlabel={
+            "bgcolor": "#FFFFFF",
+            "font_color": "#2C2C2C",
+        },
+    )
+
+    figure.update_xaxes(
+        showline=False,
+        zeroline=False,
+        gridcolor="#E8E6E1",
+        tickfont={
+            "color": "#6B7280",
+        },
+        title_font={
+            "color": "#6B7280",
+        },
+    )
+
+    figure.update_yaxes(
+        showline=False,
+        zeroline=False,
+        gridcolor="#E8E6E1",
+        tickfont={
+            "color": "#6B7280",
+        },
+        title_font={
+            "color": "#6B7280",
         },
     )
 

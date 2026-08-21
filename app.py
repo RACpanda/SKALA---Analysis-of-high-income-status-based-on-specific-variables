@@ -742,19 +742,19 @@ def display_unadjusted_result(
                         ],
                     },
                     {
-                        "통계 항목": "오즈비 (Odds Ratio)",
+                        "통계 항목": "Odds Ratio",
                         "값": unadjusted[
                             "odds_ratio"
                         ],
                     },
                     {
-                        "통계 항목": "오즈비 95% 신뢰구간 하한",
+                        "통계 항목": "Odds Ratio 95% 신뢰구간 하한",
                         "값": unadjusted[
                             "odds_ratio_ci_95_low"
                         ],
                     },
                     {
-                        "통계 항목": "오즈비 95% 신뢰구간 상한",
+                        "통계 항목": "Odds Ratio 95% 신뢰구간 상한",
                         "값": unadjusted[
                             "odds_ratio_ci_95_high"
                         ],
@@ -2563,29 +2563,74 @@ def prediction_page() -> None:
         "하나씩 바꿔보면서 예측 확률이 얼마나 달라지는지 비교합니다."
     )
 
-    try:
-        explanation_figure = (
-            plot_prediction_explanation(
-                prediction_result
-            )
+    explanation_features = (
+        prediction_result
+        .get(
+            "explanation",
+            {},
         )
-
-        st.plotly_chart(
-            explanation_figure,
-            width="stretch",
+        .get(
+            "features",
+            [],
         )
-
-    except VisualizationError as exc:
-        st.warning(
-            f"입력값 비교 그래프를 표시하지 못했습니다: {exc}"
-        )
-
-    st.caption(
-        "오른쪽으로 갈수록 현재 입력값에서 예측 확률이 더 높았고, "
-        "왼쪽으로 갈수록 더 낮았습니다. "
-        "각 항목은 현재 값을 학습 데이터의 대표적인 값으로 하나씩 "
-        "바꿔 비교한 결과이며, 원인과 결과를 의미하지 않습니다."
     )
+
+    max_impact = max(
+        (
+            abs(
+                float(
+                    item.get(
+                        "impact_percentage_points",
+                        0,
+                    )
+                )
+            )
+            for item in explanation_features
+        ),
+        default=0.0,
+    )
+
+
+    # 변화가 사실상 없는 경우
+    if max_impact < 0.01:
+
+        st.info(
+            "현재 입력에서는 각 항목을 대표적인 값으로 바꿔도 "
+            "예측 확률의 변화가 거의 없었습니다."
+        )
+
+        st.caption(
+            "현재 입력값이 학습 데이터의 대표적인 값과 같거나 비슷하면 "
+            "이런 결과가 나타날 수 있습니다."
+        )
+
+
+    # 의미 있는 변화가 있는 경우에만 그래프 표시
+    else:
+
+        try:
+            explanation_figure = (
+                plot_prediction_explanation(
+                    prediction_result
+                )
+            )
+
+            st.plotly_chart(
+                explanation_figure,
+                width="stretch",
+            )
+
+        except VisualizationError as exc:
+            st.warning(
+                f"입력값 비교 그래프를 표시하지 못했습니다: {exc}"
+            )
+
+        st.caption(
+            "오른쪽으로 갈수록 현재 입력값에서 예측 확률이 더 높았고, "
+            "왼쪽으로 갈수록 더 낮았습니다. "
+            "각 항목은 하나씩 따로 바꿔본 결과이며 "
+            "원인과 결과를 의미하지 않습니다."
+        )
 
     # --------------------------------------------------------
     # 전체 모델 기준 중요도

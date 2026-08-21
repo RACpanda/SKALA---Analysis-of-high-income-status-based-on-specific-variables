@@ -1,211 +1,138 @@
 # Adult Income Explorer
 
-Adult Census Income 데이터를 기반으로 사용자가 직접 변수를 선택하여  
-**고소득 여부와의 연관성을 분석하고, 개별 조건에 대한 고소득 확률을 예측하는 웹 기반 분석·예측 도구**입니다.
+SKALA 교육 과정에서 진행한 **Adult Census Income 기반 데이터 분석 및 머신러닝 프로젝트**입니다.
 
-SKALA 과정에서 학습한 데이터 처리, 통계 분석, 머신러닝, 모델 평가, 시각화, 웹 서비스 구현을 하나의 End-to-End 프로젝트로 통합하는 것을 목표로 합니다.
+사용자가 직접 변수를 선택해 **연 소득 50,000달러 초과 여부와의 관계를 탐색**하고, 개인의 조건을 입력해 **연 소득 50,000달러 초과 확률을 예측**할 수 있는 Streamlit 웹 애플리케이션입니다.
 
----
-
-# 1. 프로젝트 소개
-
-Adult Census Income 데이터는 개인의 나이, 교육 수준, 직업, 근무시간 등의 특성과 함께 연 소득이 50,000달러를 초과하는지 여부를 제공합니다.
-
-본 프로젝트는 크게 두 가지 기능으로 구성됩니다.
-
-## 연관성 분석
-
-사용자가 직접
-
-- 관심 변수(Exposure) 1개
-- 통제 변수(Control) 0개 이상
-
-을 선택하여 `high_income`과의 관계를 분석합니다.
-
-예:
-
-```text
-관심 변수: education
-통제 변수: age, sex
-```
-
-분석 질문:
-
-> 나이와 성별을 통계적으로 고려한 뒤에도 교육 수준과 고소득 여부 사이의 연관성이 나타나는가?
-
-## 고소득 예측
-
-사용자가 한 개인의 실제 조건을 입력하면 학습된 머신러닝 모델이
-
-- 연 소득 50,000달러 초과 여부
-- 고소득 예측 확률
-- 개인 입력 기준 예측 설명
-- 전체 모델 Feature Importance
-- 특정 입력값 변화에 따른 What-if 결과
-
-를 제공합니다.
-
-연관성 분석과 머신러닝 예측은 서로 다른 질문을 다룹니다.
-
-> **연관성 분석**  
-> 어떤 변수가 고소득 여부와 어떻게 연결되어 있는가?
-
-> **머신러닝 예측**  
-> 현재 입력 조건에서 모델이 고소득일 확률을 얼마나 예측하는가?
+단순한 통계 결과 출력에 그치지 않고, 일반 사용자도 분석 결과를 이해할 수 있도록 입력·분석·예측 과정을 하나의 웹 UX로 구성했습니다.
 
 ---
 
-# 2. Version History
+## 1. 주요 기능
 
-## Version 1.0 — Service Foundation
+서비스는 크게 두 가지 기능으로 구성됩니다.
 
-분석·예측 서비스의 기본 구조를 구현했습니다.
+### 1.1 소득과의 관계
 
-### 연관성 분석
+사용자가 궁금한 변수 하나를 선택해 연 소득 50,000달러 초과 여부와 어떤 관계가 있는지 확인할 수 있습니다.
 
-- 사용자 관심 변수 선택
-- 사용자 통제 변수 선택
-- Continuous / Binary / Categorical 변수별 조정 전 분석
-- Logistic Regression 기반 조정 후 분석
-- Adjusted Odds Ratio
-- 선택적 Propensity Score Matching
-- Plotly 기반 동적 시각화
+필요한 경우 다른 변수를 **함께 고려할 항목**으로 선택해 분석할 수 있습니다.
 
-### 머신러닝 예측
+지원하는 변수 유형은 다음과 같습니다.
 
-- HistGradientBoosting 기반 고소득 예측
-- 개인 고소득 예측 확률
-- 개인 입력 기준 예측 설명
-- What-if Simulation
-- Global Permutation Importance
-- `sex`, `race` 기준 공정성 진단
+* 연속형
+* 이진형
+* 범주형
 
-### 웹 서비스
+분석 결과는 다음 순서로 제공합니다.
 
-- Streamlit 기반 UI
-- 연관성 분석 / 고소득 예측 기능 분리
-- 사용자 요청에 따른 동적 분석 및 시각화
+1. 데이터에서 보이는 관계
+2. 다른 조건을 함께 고려한 결과
+3. 모델이 계산한 예상 비율
+4. 조건이 충족되는 경우 PSM 추가 분석
+
+전문적인 통계 결과를 그대로 노출하기보다 사용자가 이해할 수 있는 문장을 먼저 보여주고, p-value 등 필요한 통계 정보는 상세 영역에서 확인할 수 있도록 구성했습니다.
 
 ---
 
-## Version 1.1 — Association Analysis Upgrade
+### 1.2 내 소득 예측
 
-Version 1.1에서는 머신러닝 모델을 변경하지 않고  
-**연관성 분석의 안정성과 해석력을 강화했습니다.**
+사용자가 자신의 조건을 입력하면 학습된 머신러닝 모델이 **연 소득 50,000달러를 초과할 확률**을 계산합니다.
 
-주요 변경사항:
+주요 입력 변수는 다음과 같습니다.
 
-- Standard Logistic Regression 실패 시 Binomial GLM fallback
-- 범주형 관심 변수 Overall Wald Test
-- Average Marginal Prediction 기반 Adjusted Probability
-- 회귀모형 수렴 및 추정 실패 진단 강화
+* 나이
+* 성별
+* 인종
+* 혼인 상태
+* 가구 내 관계
+* 출신 국가
+* 교육 수준
+* 직업
+* 고용 형태
+* 주당 근무시간
+* 투자·자산 이익
+* 투자·자산 손실
 
-### 핵심 변화
+범주형 선택값은 사용자가 쉽게 이해할 수 있도록 다음과 같이 표시합니다.
 
-```text
-v1.0
-Adjusted Odds Ratio 중심
+* 남성 (Male)
+* 민간 기업 (Private)
+* 학사 (Bachelors)
+* 전문직 (Prof-specialty)
 
-        ↓
-
-v1.1
-Adjusted Odds Ratio
-+
-Overall Wald Test
-+
-Adjusted Probability
-+
-GLM fallback
-```
+화면에서는 한글 설명을 제공하지만, 모델에는 원본 데이터의 범주값을 그대로 전달합니다.
 
 ---
 
-## Version 1.2 — Prediction Reliability Upgrade
+## 2. 소득과의 관계 분석
 
-Version 1.2에서는 새로운 머신러닝 알고리즘을 추가하기보다  
-**현재 예측 모델의 신뢰성과 확률 해석을 강화했습니다.**
+### 2.1 데이터에서 보이는 관계
 
-주요 작업:
+다른 조건을 별도로 고려하기 전에 관심 변수와 연 소득 50,000달러 초과 여부 사이에서 관찰되는 관계를 확인합니다.
 
-1. 현재 최종 피처 기준 모델 재튜닝
-2. Probability Calibration 검증
-3. Classification Threshold 재검토
+#### 연속형 변수
 
-### 최종 결정
+Point-biserial correlation을 이용해 연속형 변수와 이진형 소득 변수 사이의 관계를 확인합니다.
 
-| 항목 | 결정 |
-|---|---|
-| 기본 모델 | HistGradientBoostingClassifier 유지 |
-| Hyperparameter | 기존 설정 유지 |
-| Probability Calibration | Sigmoid |
-| Classification Threshold | 0.50 |
-| 예측 확률 | Calibrated Probability 사용 |
+예시:
 
-즉 현재 최종 예측 구조는 다음과 같습니다.
+> 나이 값이 큰 쪽에서 연 소득 5만 달러를 넘는 비율도 전반적으로 높은 방향의 관계가 나타났습니다.
 
-```text
-사용자 입력
-    ↓
-공통 전처리
-    ↓
-HistGradientBoostingClassifier
-    ↓
-Raw Probability
-    ↓
-Sigmoid Calibration
-    ↓
-Calibrated Probability
-    ↓
-Threshold 0.50
-    ↓
->50K / <=50K
-```
+#### 이진형 변수
+
+두 그룹에서 연 소득 50,000달러를 넘는 비율을 직접 비교합니다.
+
+#### 범주형 변수
+
+각 범주의 고소득 비율을 비교하고 Chi-square 검정을 수행합니다.
+
+사용자 화면에서는 주요 차이를 먼저 보여주고, 전문적인 통계 검정 결과는 상세 정보에서 확인할 수 있도록 구성했습니다.
 
 ---
 
-# 3. Version 1.2 모델 재튜닝
+### 2.2 다른 조건을 함께 고려한 결과
 
-현재 서비스에서 실제 사용하는 최종 예측 피처를 기준으로  
-HistGradientBoosting의 하이퍼파라미터를 다시 탐색했습니다.
+관심 변수와 소득 사이의 관계를 Logistic Regression 기반으로 다시 확인합니다.
 
-## 방법
+사용자가 함께 고려할 항목을 선택하면 해당 변수들을 모델에 함께 포함하여 관계를 확인합니다.
 
-- 현재 production 데이터 처리 방식 사용
-- 동일한 학습 데이터 사용
-- 5-fold Stratified Cross Validation
-- RandomizedSearchCV
-- ROC-AUC 기준 후보 선정
-- 40개 parameter combination 탐색
+통제 변수를 선택하지 않은 경우에는 이를 별도의 조정 결과로 표현하지 않고 **통계 모델로 다시 확인한 결과**로 구분합니다.
 
-## 결과
+v1.1부터 일반 Logistic Regression이 안정적으로 적합되지 않는 경우 Binomial GLM 기반 fallback을 사용할 수 있도록 분석 안정성을 강화했습니다.
 
-| 모델 | CV ROC-AUC Mean | CV Std |
-|---|---:|---:|
-| 기존 모델 | 0.925832 | 0.003864 |
-| 최적 튜닝 후보 | 0.926272 | 0.004279 |
+범주형 관심 변수에서는 개별 범주뿐 아니라 변수 전체의 관계를 확인하기 위한 Joint Wald Test도 지원합니다.
 
-차이:
+---
 
-```text
-+0.000440
-```
+### 2.3 예상 비율
 
-최적 후보:
+Logistic Regression 결과를 사용자가 보다 쉽게 해석할 수 있도록 관심 변수 값에 따른 예상 고소득 비율을 제공합니다.
 
-```text
-learning_rate        0.1385808858
-max_depth            5
-max_iter             236
-max_leaf_nodes       63
-min_samples_leaf     24
-l2_regularization    1.6978276485
-```
+통제 변수가 선택된 경우 다른 변수들의 관측값은 유지하면서 관심 변수만 동일한 값으로 설정해 평균 예측확률을 계산합니다.
 
-개선폭이 매우 작고 CV 변동성은 오히려 소폭 증가했습니다.
+사용자 화면에서는 다음과 같이 구분합니다.
 
-따라서 **현재 기존 MODEL_PARAMS를 유지**했습니다.
+* 통제 변수 있음 → **조건을 고려한 예상 비율**
+* 통제 변수 없음 → **모델이 계산한 예상 비율**
 
-현재 설정:
+---
+
+### 2.4 PSM
+
+이진형 관심 변수와 통제 변수가 선택된 경우 선택적으로 Propensity Score Matching을 수행할 수 있습니다.
+
+PSM은 관측된 조건이 비슷한 대상을 매칭해 두 그룹을 추가로 비교하기 위한 분석입니다.
+
+다만 데이터에 포함된 변수만 고려할 수 있으므로 결과를 확정적인 인과효과로 해석하지 않습니다.
+
+---
+
+## 3. 예측 모델
+
+예측 모델은 `HistGradientBoostingClassifier`를 기반으로 구성했습니다.
+
+최종 모델 파라미터는 다음과 같습니다.
 
 ```python
 MODEL_PARAMS = {
@@ -216,948 +143,332 @@ MODEL_PARAMS = {
 }
 ```
 
-재튜닝의 목적은 반드시 새로운 파라미터를 채택하는 것이 아니라,  
-현재 설정이 최종 서비스 피처에서도 충분히 적절한지 다시 확인하는 것이었습니다.
+v1.2에서 현재 12개 입력 변수를 기준으로 재튜닝을 수행했으나 기존 모델 대비 ROC-AUC 개선 폭이 약 `0.00044`로 매우 작아 기존 파라미터를 유지했습니다.
 
 ---
 
-# 4. Version 1.2 Probability Calibration
+## 4. 확률 보정
 
-웹 서비스에서는 사용자에게 다음과 같이 확률값 자체를 제공합니다.
+v1.2에서는 모델이 출력하는 확률의 신뢰성을 높이기 위해 calibration을 추가했습니다.
+
+비교한 방법은 다음과 같습니다.
+
+* Uncalibrated
+* Sigmoid
+* Isotonic
+
+OOF 검증 결과 Sigmoid calibration이 Brier Score와 ROC-AUC를 유지하면서 Log Loss 측면에서도 안정적인 결과를 보여 최종 방식으로 선택했습니다.
+
+최종 예측 구조는 다음과 같습니다.
 
 ```text
-고소득 예측 확률
-63.4%
-```
-
-ROC-AUC가 높다고 해서 이러한 확률값 자체가 실제 발생률과 잘 일치한다는 의미는 아닙니다.
-
-따라서 다음 세 가지를 비교했습니다.
-
-```text
-Uncalibrated
+HistGradientBoosting
+        ↓
 Sigmoid Calibration
-Isotonic Calibration
-```
-
-## Training OOF Calibration 결과
-
-| Method | ROC-AUC | Brier Score ↓ | Log Loss ↓ | Mean Probability Bias |
-|---|---:|---:|---:|---:|
-| Uncalibrated | 0.925759 | 0.111171 | 0.337592 | +0.104995 |
-| Sigmoid | **0.926222** | 0.089987 | **0.282839** | **+0.000025** |
-| Isotonic | 0.925840 | **0.089973** | 0.286128 | +0.000028 |
-
-기존 모델은:
-
-```text
-실제 고소득률       24.09%
-평균 예측확률       34.59%
-```
-
-로 평균적으로 약 `+10.50%p` 높은 확률을 출력했습니다.
-
-Sigmoid Calibration 적용 후:
-
-```text
-실제 고소득률       24.09%
-평균 예측확률       24.09%
-```
-
-수준으로 평균적인 확률 편향이 크게 감소했습니다.
-
-Isotonic의 Brier Score가 아주 조금 더 낮았지만 차이는 매우 작았고,  
-Sigmoid가 Log Loss와 ROC-AUC에서 더 좋은 결과를 보였습니다.
-
-따라서 최종 모델에는 **Sigmoid Calibration**을 적용했습니다.
-
----
-
-# 5. Version 1.2 Classification Threshold
-
-Calibration 적용 후 예측확률을 기준으로 classification threshold를 다시 검토했습니다.
-
-탐색 범위:
-
-```text
-0.05 ~ 0.95
-```
-
-## 주요 후보
-
-| 기준 | Threshold | Precision | Recall | F1 |
-|---|---:|---:|---:|---:|
-| 기본값 | **0.50** | 0.7781 | 0.6520 | 0.7095 |
-| Best F1 | 0.39 | 0.6964 | 0.7603 | **0.7269** |
-| Best Balanced Accuracy | 0.24 | 0.5922 | **0.8763** | 0.7068 |
-| Precision ≈ Recall | 0.43 | 0.7288 | 0.7221 | 0.7254 |
-
-`0.39`에서는 F1이 증가하지만 Precision이 감소하고 Recall이 증가합니다.
-
-이는 단순한 성능 개선이 아니라 다음과 같은 정책적 선택을 의미합니다.
-
-```text
-낮은 threshold
-→ 고소득자를 더 많이 탐지
-→ Recall 증가
-→ False Positive 증가
-
-높은 threshold
-→ 고소득 판정을 더 보수적으로 수행
-→ Precision 증가
-→ False Negative 증가
-```
-
-현재 프로젝트에는 False Positive와 False Negative 중 어느 쪽의 비용이 더 큰지에 대한 업무 목적이 정의되어 있지 않습니다.
-
-따라서 보정된 확률 자체를 직관적으로 해석할 수 있도록  
-**Classification Threshold는 0.50을 유지**했습니다.
-
----
-
-# 6. 현재 최종 머신러닝 모델
-
-## 기본 모델
-
-```text
-HistGradientBoostingClassifier
-```
-
-범주형 변수는 One-Hot Encoding 대신 HistGradientBoosting의 native categorical feature 처리를 사용합니다.
-
-## Probability Calibration
-
-```text
-Sigmoid Calibration
-3-fold Cross Validation
-```
-
-## Classification Threshold
-
-```text
-0.50
-```
-
-## 입력 피처
-
-```text
-age
-workclass
-education
-marital-status
-occupation
-relationship
-race
-sex
-capital-gain
-capital-loss
-hours-per-week
-native-country
-```
-
-총 12개 피처를 사용합니다.
-
-학습 / 테스트 데이터는 `80:20`으로 분리하며 `high_income`을 기준으로 stratified split을 적용합니다.
-
----
-
-# 7. 현재 최종 모델 성능
-
-Version 1.2 최종 모델 기준:
-
-| Metric | Score |
-|---|---:|
-| Accuracy | **0.8791** |
-| Precision | **0.7925** |
-| Recall | 0.6747 |
-| F1 | **0.7289** |
-| ROC-AUC | **0.9334** |
-| Brier Score | **0.0848** |
-| Log Loss | **0.2704** |
-| Test rows | 6,508 |
-
-확률 수준:
-
-```text
-실제 고소득률            24.0934%
-평균 예측 고소득 확률    24.3876%
-평균 확률 편향            +0.2942%p
-```
-
-## Version 1.1 대비
-
-| Metric | v1.1 | v1.2 |
-|---|---:|---:|
-| Accuracy | 0.8373 | **0.8791** |
-| Precision | 0.6130 | **0.7925** |
-| Recall | **0.8807** | 0.6747 |
-| F1 | 0.7228 | **0.7289** |
-| ROC-AUC | 0.9327 | **0.9334** |
-
-Calibration 이후 `0.50` threshold를 사용하면서 예측 판정 특성이 달라졌습니다.
-
-Version 1.1은 상대적으로 많은 표본을 고소득으로 분류하여 Recall이 높고 Precision이 낮았습니다.
-
-Version 1.2는 고소득 판정이 더 보수적으로 바뀌면서 Precision이 증가하고 Recall이 감소했습니다.
-
-따라서 모든 분류 지표가 일방적으로 개선됐다고 해석하지 않습니다.
-
-Version 1.2의 핵심 개선은:
-
-> **기존 ROC-AUC 수준을 유지하면서 사용자에게 제공하는 예측확률의 calibration을 크게 개선한 것**
-
-입니다.
-
----
-
-# 8. 연관성 분석
-
-## 8.1 분석 가능 변수
-
-| 변수 | 유형 |
-|---|---|
-| age | Continuous |
-| workclass | Categorical |
-| education | Categorical |
-| marital-status | Categorical |
-| occupation | Categorical |
-| relationship | Categorical |
-| race | Categorical |
-| sex | Binary |
-| capital-gain | Continuous |
-| capital-loss | Continuous |
-| hours-per-week | Continuous |
-| native-country | Categorical |
-
-제외 변수:
-
-### `fnlwgt`
-
-Census 표본 가중치이므로 일반적인 사용자 관심 변수에서 제외합니다.
-
-### `education-num`
-
-`education`의 숫자형 표현으로 정보가 중복되므로 제외합니다.
-
-### `income`, `high_income`
-
-결과 변수이므로 설명변수로 사용할 수 없습니다.
-
----
-
-# 9. 조정 전 연관성 분석
-
-관심 변수 유형에 따라 자동으로 분석 방법을 선택합니다.
-
-## Continuous
-
-예:
-
-```text
-age
-capital-gain
-capital-loss
-hours-per-week
-```
-
-Point-biserial correlation을 이용합니다.
-
-시각화에서는 같은 분석 표본을 분위 구간으로 나누어 실제 고소득률을 표시합니다.
-
-## Binary
-
-현재 기본 이진 변수:
-
-```text
-sex
-```
-
-계산 결과:
-
-- 표본 수
-- 고소득률
-- 고소득률 차이
-- Risk Ratio
-- Odds Ratio
-- 95% Confidence Interval
-- Fisher exact p-value
-- Cohen's h
-
-## Categorical
-
-예:
-
-```text
-education
-occupation
-workclass
-race
-native-country
-```
-
-각 범주의 고소득률을 비교하고 Chi-square test를 수행합니다.
-
----
-
-# 10. 통제 변수 조정
-
-통제 변수는 특정 값으로 고정되는 변수가 아닙니다.
-
-예:
-
-```text
-관심 변수: education
-통제 변수: age, sex, race
-```
-
-분석 질문:
-
-> 나이, 성별, 인종을 통계적으로 고려한 뒤에도 교육 수준과 고소득 여부 사이의 연관성이 나타나는가?
-
-조정 후 분석에서는 다음 결과를 제공합니다.
-
-- Adjusted Odds Ratio
-- 95% Confidence Interval
-- p-value
-- Overall Wald Test
-- Adjusted Probability
-
-이 결과는 선택한 통제 변수를 고려한 **조건부 연관성**이며 인과효과를 의미하지 않습니다.
-
----
-
-# 11. Logistic Regression / GLM Fallback
-
-기본 조정 모형은 Logistic Regression입니다.
-
-일부 변수 조합에서는 희소 범주, 완전분리 또는 설명변수 구조 때문에 추정이 불안정해질 수 있습니다.
-
-Version 1.1부터 다음 구조를 사용합니다.
-
-```text
-Standard Logistic Regression
         ↓
-정상 수렴
-        ↓
-결과 사용
-
-실패 또는 불안정
-        ↓
-Binomial GLM
-IRLS + pseudo-inverse
-        ↓
-정상 수렴
-        ↓
-결과 사용
-
-여전히 불안정
-        ↓
-분석 실패 안내
+연 소득 50,000달러 초과 확률
 ```
-
-GLM fallback은 분석 질문을 변경하는 것이 아니라 동일한 Binomial-Logit 구조를 다른 적합 방식으로 계산하는 것입니다.
-
-안정적으로 추정할 수 없는 경우 결과를 억지로 생성하지 않습니다.
 
 ---
 
-# 12. Overall Wald Test
+## 5. 분류 Threshold
 
-범주형 관심 변수에서는 각 비기준 범주의 회귀계수가 동시에 0인지 검정합니다.
+분류 threshold에 대해서도 OOF 검증을 수행했습니다.
 
-귀무가설:
+검토한 기준은 다음과 같습니다.
 
-```text
-H0:
-범주형 관심 변수의 모든 비기준 범주 회귀계수 = 0
-```
+* 기본 threshold 0.50
+* F1 최적 threshold
+* Balanced Accuracy 최적 threshold
+* Precision과 Recall이 가장 가까운 threshold
 
-Overall p-value가 충분히 작다면 선택한 통제 변수를 고려한 뒤에도 해당 관심 변수 전체와 고소득 여부 사이에 통계적 연관성이 있다는 근거로 해석합니다.
-
-Overall Test가 유의하다고 해서 모든 범주가 서로 유의하게 다르다는 의미는 아닙니다.
-
-따라서:
-
-```text
-Overall Wald Test
-        ↓
-변수 전체 연관성 확인
-        ↓
-Adjusted OR / CI / p-value
-        ↓
-개별 범주 차이 확인
-```
-
-순서로 해석합니다.
+False Positive 또는 False Negative에 대한 별도의 업무 비용이 정의되지 않았기 때문에 특정 지표만 임의로 최대화하지 않고 기본 threshold `0.50`을 유지했습니다.
 
 ---
 
-# 13. Adjusted Probability
+## 6. 최종 모델 성능
 
-Adjusted Probability는 Average Marginal Prediction 방식으로 계산합니다.
+Held-out test set 기준 최종 결과입니다.
 
-```text
-실제 분석 표본 유지
-        ↓
-통제 변수의 실제 관측값 유지
-        ↓
-관심 변수만 특정 값으로 변경
-        ↓
-각 사람의 고소득 예측확률 계산
-        ↓
-전체 평균 계산
-```
+| Metric                     |  Result |
+| -------------------------- | ------: |
+| Test rows                  |   6,508 |
+| Accuracy                   |  0.8791 |
+| Precision                  |  0.7925 |
+| Recall                     |  0.6747 |
+| F1                         |  0.7289 |
+| ROC-AUC                    |  0.9334 |
+| Brier Score                |  0.0848 |
+| Log Loss                   |  0.2704 |
+| Actual Positive Rate       |  0.2409 |
+| Mean Predicted Probability |  0.2439 |
+| Probability Bias           | +0.0029 |
 
-예:
+Calibration 이후 평균 예측확률이 실제 positive rate와 매우 가까워졌습니다.
 
-```text
-관심 변수: education
-통제 변수: age, sex
-```
-
-각 사람의 실제 `age`, `sex`는 유지하고 `education`만 특정 범주로 변경합니다.
-
-이 결과는:
-
-- 실제 관측 고소득률과 다르며
-- 머신러닝 개인 예측 확률과도 다르고
-- 인과효과도 아닙니다.
+다만 Precision은 상승하고 Recall은 낮아졌기 때문에 calibration이 모든 분류 성능 지표를 동시에 개선했다고 해석하지 않습니다.
 
 ---
 
-# 14. Propensity Score Matching
+## 7. 예측 결과 설명
 
-PSM은 다음 조건에서 선택적으로 수행합니다.
+### 7.1 내 입력값 살펴보기
 
-- 관심 변수가 Binary
-- 통제 변수가 1개 이상
+각 입력값을 학습 데이터의 대표적인 값으로 하나씩 변경했을 때 예측 확률이 얼마나 달라지는지 확인합니다.
 
-방법:
+이 기능은 특정 사용자의 현재 입력 조건을 이해하기 위한 **모델 기반 비교 설명**입니다.
 
-- Common Support
-- 1:1 Greedy Nearest-Neighbor Matching
-- Replacement 미사용
-- `0.2 × SD(logit propensity score)` Caliper
-- Standardized Mean Difference
-- McNemar test
+각 변수는 하나씩 독립적으로 변경되므로 결과를 서로 더할 수 없으며 인과효과를 의미하지 않습니다.
 
-매칭 후 절대 SMD `< 0.1`을 균형 진단 기준으로 사용합니다.
-
-PSM 역시 관측되지 않은 교란요인을 제거할 수 없으므로 확정적인 인과효과로 해석하지 않습니다.
+변경에 따른 예측 확률 차이가 매우 작은 경우에는 불필요하게 큰 그래프를 보여주지 않고 변화가 거의 없다는 안내를 제공합니다.
 
 ---
 
-# 15. 개인 예측 설명
+### 7.2 모델이 많이 참고한 정보
 
-각 feature의 현재 값을 학습 데이터의 대표값으로 하나씩 변경해 예측확률 변화를 계산합니다.
+전체 테스트 데이터를 기준으로 Permutation Importance를 계산합니다.
 
-예:
+각 변수를 섞었을 때 ROC-AUC가 얼마나 감소하는지를 기준으로 모델이 해당 정보를 예측에 얼마나 활용하는지 확인합니다.
+
+이 값은 다음을 의미하지 않습니다.
+
+* 특정 개인의 예측에 미친 영향의 크기
+* 실제 소득에 미치는 영향
+* 인과효과
+
+---
+
+### 7.3 What-if
+
+다른 입력 조건은 그대로 유지한 채 하나의 변수만 변경하면서 모델의 예측 확률이 어떻게 달라지는지 확인할 수 있습니다.
+
+예를 들어 다음과 같은 질문을 확인할 수 있습니다.
+
+* 나이만 바꾸면 예측 확률은 어떻게 달라지는가?
+* 교육 수준만 바꾸면 예측 확률은 어떻게 달라지는가?
+
+What-if 결과 역시 모델 내부의 예측 변화를 보여주는 기능이며 실제로 해당 조건을 변경했을 때 소득이 같은 방식으로 변한다는 의미는 아닙니다.
+
+---
+
+## 8. v1.3 GUI / UX 개선
+
+v1.3에서는 새로운 분석 기능을 추가하기보다 기존 기능을 일반 사용자가 쉽게 사용할 수 있도록 전체 GUI와 UX를 개선했습니다.
+
+### 메인 화면
+
+서비스의 첫 화면을 분석 도구 중심 표현에서 사용자 중심 표현으로 변경했습니다.
 
 ```text
-현재 age = 52
-대표 age = 37
+SKALA · 소득 데이터 탐색
 
-현재 예측확률 = 68%
-age만 대표값으로 변경 = 59%
-
-차이 = +9%p
+소득이 높은 사람들은 어떤 점이 다를까요?
 ```
 
-각 feature를 독립적으로 변경한 결과이므로 영향값을 서로 더할 수 없습니다.
-
-또한 SHAP value나 인과효과를 의미하지 않습니다.
-
-Version 1.2부터 이러한 계산에서도 **Sigmoid 보정된 최종 예측확률**을 사용합니다.
-
----
-
-# 16. What-if Simulation
-
-다른 모든 조건을 유지하고 하나의 feature만 변경합니다.
-
-예:
+브라우저 제목도 다음과 같이 변경했습니다.
 
 ```text
-age 25 → 18%
-age 35 → 31%
-age 45 → 48%
+소득 데이터 탐색 | SKALA
 ```
 
-연속형 변수는 학습 데이터의 약 5~95 분위 범위에서 여러 값을 생성합니다.
-
-범주형 변수는 학습 당시 관측된 범주를 사용합니다.
-
-What-if 결과는 모델의 입력 민감도와 시나리오별 예측을 보여주는 것이며 인과효과가 아닙니다.
-
-Version 1.2부터 What-if 역시 **보정된 예측확률**을 사용합니다.
-
 ---
 
-# 17. Global Feature Importance
+### 페이지 네비게이션
 
-전체 테스트셋을 기준으로 Permutation Importance를 계산합니다.
-
-각 변수를 무작위로 섞었을 때 ROC-AUC가 얼마나 감소하는지 이용합니다.
-
-Feature Importance는:
-
-> 해당 변수가 고소득의 원인이다.
-
-라는 의미가 아닙니다.
-
-여러 변수가 모델에 동시에 포함된 상태에서 해당 정보가 예측 성능에 얼마나 기여하는지를 나타냅니다.
-
----
-
-# 18. 모델 공정성 진단
-
-`sex`, `race` 그룹별로 다음을 계산합니다.
-
-- Recall
-- False Negative Rate
-- 실제 양성 표본 수
-
-양성 표본이 30개 이상인 집단을 중심으로 결과를 해석합니다.
-
-현재 내부 기준:
+두 기능을 다음과 같이 구분했습니다.
 
 ```text
-Minimum group Recall >= 0.60
-Maximum Recall gap <= 0.10
+소득과의 관계
+내 소득 예측
 ```
 
-공정성 진단 결과는 전체 모델 성능과 별도로 확인합니다.
+현재 선택된 페이지를 다시 눌러도 페이지 상태나 선택 상태가 변경되지 않도록 navigation state를 관리합니다.
 
 ---
 
-# 19. 데이터 정제
+### 입력 화면
 
-원본 데이터:
-
-```text
-data/raw/adult.csv
-```
-
-공통 정제:
-
-1. 문자열 공백 제거
-2. `"?"`, 빈 문자열을 결측값으로 통일
-3. 숫자형 변수 변환
-4. 변환 실패값 결측 처리
-5. 완전 중복 행 제거
-6. 논리적 허용 범위 밖 행 제거
-7. `income`으로 `high_income` 생성
-
-연관성 분석에서는:
+기존의 전문적인 분석 용어를 일반 사용자 중심 표현으로 변경했습니다.
 
 ```text
-target + exposure + controls
+관심 변수 → 궁금한 항목
+통제 변수 → 함께 고려할 항목
+분석 실행 → 결과 보기
+예측 실행 → 내 결과 확인하기
 ```
 
-에 필요한 열을 기준으로 Complete-case 분석 표본을 만듭니다.
-
-머신러닝에서는 target이 없는 행만 제거하고 피처 결측값은 Pipeline에서 처리합니다.
+또한 개발용 영문 컬럼명을 기본 입력 화면에서 제거하고, 범주형 값은 `한글 (영어)` 형식으로 표시했습니다.
 
 ---
 
-# 20. 프로젝트 구조
+### 결과 화면
+
+분석 결과는 다음 원칙으로 재구성했습니다.
+
+```text
+결과 해석
+↓
+사용자가 이해할 수 있는 수치 또는 그래프
+↓
+필요한 경우 분석 상세 정보
+```
+
+관계 분석은 다음과 같은 흐름으로 구성했습니다.
+
+```text
+01 · 데이터에서 보이는 관계
+02 · 다른 조건을 함께 고려한 결과
+03 · 조건을 고려한 예상 비율
+04 · PSM 추가 분석
+```
+
+예측 결과는 다음과 같이 구성했습니다.
+
+```text
+01 · 내 예측 결과
+02 · 내 입력값 살펴보기
+03 · 모델이 많이 참고한 정보
+04 · 조건을 바꿔서 확인하기
+```
+
+---
+
+### 결과 상태 관리
+
+사용자가 입력창의 값을 변경하더라도 기존 분석 결과가 즉시 변경되지 않도록 수정했습니다.
+
+새로운 조건은 반드시 `결과 보기`를 다시 실행했을 때만 결과 화면에 반영됩니다.
+
+예측에서도 새로운 개인 예측을 실행하면 이전 입력 기준으로 계산된 What-if 결과를 초기화하도록 구성했습니다.
+
+---
+
+### 시각화
+
+Plotly 그래프도 전체 웹 UI와 맞도록 정리했습니다.
+
+* 영문 변수명 한글화
+* 범주값 한글 표시
+* 중복된 Plotly 내부 제목 제거
+* 웹 UI와 동일한 sage 계열 색상 적용
+* 그래프 여백 및 grid 통일
+* 사용자 중심 hover 문구 적용
+* 작은 예측 변화량의 표시 방식 개선
+
+---
+
+## 9. 프로젝트 구조
 
 ```text
 .
 ├── app.py
 ├── main.py
-│
+├── config.py
 ├── data/
-│   └── raw/
-│       └── adult.csv
-│
-├── docs/
-│   ├── ANALYSIS_DESIGN.md
-│   ├── ML_MODELING_SUMMARY.md
-│   └── MODEL_SELECTION_LOG.md
-│
+│   ├── raw/
+│   └── processed/
 ├── outputs/
 │   ├── figures/
-│   │   ├── model_confusion_matrix.png
-│   │   ├── model_performance_metrics.png
-│   │   └── model_roc_curve.png
-│   │
-│   ├── models/
-│   │   └── income_model_bundle.joblib
-│   │
-│   └── tables/
-│       ├── model_card.json
-│       ├── model_fairness_by_group.csv
-│       ├── model_feature_importance.csv
-│       ├── model_input_schema.json
-│       ├── model_metrics.json
-│       ├── model_predictions.csv
-│       ├── model_tuning_v1_2.json
-│       ├── model_calibration_v1_2.json
-│       └── model_threshold_v1_2.json
-│
+│   ├── tables/
+│   └── models/
 ├── scripts/
 │   └── experiments/
-│       ├── model_tuning_v1_2.py
-│       ├── model_calibration_v1_2.py
-│       └── model_threshold_v1_2.py
-│
-├── src/
-│   ├── __init__.py
-│   ├── association.py
-│   ├── config.py
-│   ├── data.py
-│   ├── eda.py
-│   ├── modeling.py
-│   ├── model_visualization.py
-│   ├── statistics.py
-│   └── visualization.py
-│
-├── pyproject.toml
-├── requirements.txt
-└── README.md
+└── src/
+    ├── association.py
+    ├── data.py
+    ├── eda.py
+    ├── modeling.py
+    ├── statistics.py
+    ├── visualization.py
+    ├── model_visualization.py
+    └── report.py
 ```
-
-`scripts/experiments`는 서비스 실행에 필요한 production 코드가 아니라 모델 선택 과정을 재현하기 위한 실험 코드입니다.
 
 ---
 
-# 21. 모듈 역할
+## 10. 실행 방법
 
-## `app.py`
-
-Streamlit 기반 웹 UI를 담당합니다.
-
-분석 또는 머신러닝 계산을 직접 구현하지 않고 `src`의 함수를 호출합니다.
-
-## `src/config.py`
-
-- 공통 경로
-- Adult 데이터 컬럼
-- 변수 타입
-- 분석 가능 변수
-- 예측 피처
-- Random seed
-
-를 관리합니다.
-
-## `src/data.py`
-
-Adult 데이터를 로딩하고 공통 정제 DataFrame을 생성합니다.
-
-## `src/eda.py`
-
-개발 및 데이터 품질 점검용 EDA를 수행합니다.
-
-## `src/statistics.py`
-
-- Binary group association
-- Propensity Score Matching
-- SMD balance diagnostics
-- McNemar test
-
-를 담당합니다.
-
-## `src/association.py`
+Adult Census Income 데이터를 다음 경로에 준비합니다.
 
 ```text
-Request validation
-        ↓
-Analysis sample
-        ↓
-Unadjusted association
-        ↓
-Standard Logistic Regression
-        ↓
-필요 시 Binomial GLM fallback
-        ↓
-Overall Wald Test
-        ↓
-Adjusted Odds Ratio
-        ↓
-Adjusted Probability
-        ↓
-Optional PSM
+data/raw/adult.csv
 ```
 
-을 담당합니다.
-
-## `src/modeling.py`
-
-- HistGradientBoosting 학습
-- Sigmoid Probability Calibration
-- Classification threshold 적용
-- 모델 평가
-- 모델 bundle 저장
-- 사용자 입력 예측
-- 개인별 예측 설명
-- What-if Simulation
-- Permutation Importance
-- Fairness diagnostics
-
-를 담당합니다.
-
-## `src/visualization.py`
-
-사용자용 Plotly Figure를 생성합니다.
-
-분석 결과를 다시 계산하지 않고 `association.py`, `modeling.py` 결과를 직접 시각화합니다.
-
-## `src/model_visualization.py`
-
-개발자용 모델 평가 시각화를 담당합니다.
-
-- Performance Metrics
-- ROC Curve
-- Confusion Matrix
-
-를 PNG로 저장합니다.
-
-## `main.py`
-
-개발·검증용 CLI 진입점입니다.
-
-실제 웹 사용자는 `app.py`를 통해 서비스를 사용합니다.
-
----
-
-# 22. 설치
-
-Python 3.11 환경을 기준으로 개발했습니다.
-
-```bash
-pip install -r requirements.txt
-```
-
----
-
-# 23. 개발 파이프라인 실행
-
-전체 실행:
-
-```bash
-python main.py --stage all
-```
-
-개별 실행:
-
-```bash
-python main.py --stage data
-python main.py --stage eda
-python main.py --stage model
-python main.py --stage model-viz
-```
-
----
-
-# 24. 웹 애플리케이션 실행
-
-먼저 배포용 모델이 존재해야 합니다.
-
-```text
-outputs/models/income_model_bundle.joblib
-```
-
-실행:
+이후 Streamlit 앱을 실행합니다.
 
 ```bash
 streamlit run app.py
 ```
 
-브라우저에서:
+---
 
-```text
-연관성 분석
-고소득 예측
-```
+## 11. 결과 해석 시 주의사항
 
-두 기능을 사용할 수 있습니다.
+이 서비스가 제공하는 통계 분석은 **데이터에서 변수들이 함께 나타나는 관계**를 보여줍니다.
+
+다른 조건을 통계적으로 함께 고려하더라도 특정 변수가 소득 차이의 직접적인 원인이라고 단정할 수 없습니다.
+
+PSM 역시 관측된 변수만 조정할 수 있으며 데이터에 포함되지 않은 다른 요인의 차이는 통제할 수 없습니다.
+
+예측 기능은 학습된 머신러닝 모델이 입력 조건을 바탕으로 계산한 확률이며 실제 개인의 소득을 보장하거나 확정하는 결과가 아닙니다.
+
+개인 입력 설명과 What-if 역시 모델의 예측 변화를 확인하기 위한 기능이며 인과관계를 의미하지 않습니다.
 
 ---
 
-# 25. 검증
+## 12. Version History
 
-## 기본 Smoke Test
+### v1.0 — Foundation
 
-```text
-[PASS] continuous association
-[PASS] categorical association
-[PASS] binary association + PSM
-[PASS] individual prediction
-[PASS] what-if
-[PASS] global feature importance
-```
+* 변수 선택형 연관성 분석
+* 연속형 / 이진형 / 범주형 분석
+* Logistic Regression 기반 분석
+* 선택적 PSM
+* HistGradientBoosting 기반 소득 예측
+* 개인 예측 설명
+* What-if Simulation
+* Permutation Importance
+* Plotly + Streamlit 웹 UI
 
-## Version 1.1
+### v1.1 — Association Analysis Upgrade
 
-추가 검증:
+* Logistic Regression 안정성 강화
+* Standard Logit 실패 시 Binomial GLM fallback
+* 범주형 관심 변수 Overall Joint Wald Test
+* Adjusted Probability 추가
 
-- Logistic → GLM fallback
-- Overall Wald Test
-- Adjusted Probability
+### v1.2 — Prediction Reliability Upgrade
 
-## Version 1.2
+* 현재 12개 입력 변수 기준 모델 재튜닝 및 검증
+* 기존 MODEL_PARAMS 유지
+* OOF 기반 calibration 비교
+* Sigmoid calibration 적용
+* threshold 후보 비교
+* classification threshold 0.50 유지
+* calibrated probability 기반 예측 / 설명 / What-if 통일
 
-추가 검증:
+### v1.3 — GUI / UX Refinement
 
-```text
-Model Retuning
-→ 기존 파라미터와 튜닝 후보 비교
-
-Probability Calibration
-→ Uncalibrated / Sigmoid / Isotonic 비교
-
-Classification Threshold
-→ 0.05 ~ 0.95 탐색
-
-Final Evaluation
-→ calibrated probability
-→ classification metrics
-→ Brier Score
-→ Log Loss
-```
-
----
-
-# 26. 주요 출력 파일
-
-## 배포 모델
-
-```text
-outputs/models/income_model_bundle.joblib
-```
-
-포함 내용:
-
-- 최종 calibrated estimator
-- Prediction input schema
-- Classification threshold
-- Calibration method
-- Model card
-- Global permutation importance
-
-## 개발용 모델 평가
-
-```text
-outputs/tables/model_metrics.json
-outputs/tables/model_predictions.csv
-outputs/tables/model_feature_importance.csv
-outputs/tables/model_fairness_by_group.csv
-outputs/tables/model_input_schema.json
-outputs/tables/model_card.json
-```
-
-## Version 1.2 실험 결과
-
-```text
-model_tuning_v1_2.*
-model_calibration_v1_2.*
-model_threshold_v1_2.*
-```
-
-모델 선택 과정과 판단 근거를 재현하기 위한 결과입니다.
+* 메인 Hero 및 서비스 명칭 개편
+* 브라우저 UI 정리
+* 페이지 navigation 안정화
+* 입력 화면 전문용어 단순화
+* 범주형 선택값 `한글 (영어)` 지원
+* 관계 분석 결과 UX 재구성
+* 예측 결과 UX 재구성
+* 결과가 실행 시점에만 갱신되도록 상태 관리
+* Odds Ratio 중심 사용자 UI 제거
+* 개인 예측 설명 UX 개선
+* Plotly 변수명 및 범주값 한글화
+* 그래프 스타일 통일
+* 결과 섹션 간 여백 및 정보 밀도 조정
 
 ---
 
-# 27. 해석상의 주의사항
+## 13. 현재 상태
 
-## 연관성은 인과관계가 아닙니다
+**v1.3 GUI / UX Refinement 완료**
 
-Adult Census Income은 관찰 데이터입니다.
+v1.3에서는 기존 통계 분석 및 머신러닝 기능을 유지하면서 일반 사용자가 서비스를 쉽게 이해하고 사용할 수 있도록 화면 구조와 결과 전달 방식을 개선했습니다.
 
-관측된 변수를 통제하더라도 데이터에 없는 교란요인은 통제할 수 없습니다.
-
-따라서 Logistic Regression, GLM, PSM 결과는 확정적인 인과효과로 해석하지 않습니다.
-
-## Adjusted Probability도 인과효과가 아닙니다
-
-Adjusted Probability는 조정된 통계모형의 평균 예측확률입니다.
-
-## 머신러닝 예측도 인과관계가 아닙니다
-
-Feature Importance, 개인별 설명, What-if 결과는 모두 모델의 예측 구조를 설명하는 것이며 실제 인과효과를 의미하지 않습니다.
-
-## Calibrated Probability도 실제 미래를 보장하지 않습니다
-
-Probability Calibration은 예측확률과 관측 비율의 일치도를 개선합니다.
-
-그러나 개별 사용자의 실제 소득 발생 확률을 보장하거나 미래의 소득을 확정적으로 예측하는 것은 아닙니다.
-
-## 데이터의 한계
-
-Adult Census Income은 과거 미국 Census 기반 데이터입니다.
-
-현재 특정 국가, 노동시장 또는 개인에게 그대로 일반화할 수 없습니다.
-
-`sex`, `race` 관련 결과 역시 집단의 본질적인 능력 차이로 해석해서는 안 됩니다.
-
----
-
-# 28. 프로젝트 핵심 원칙
-
-1. 연관성 분석과 머신러닝 예측을 분리한다.
-2. 관심 변수와 통제 변수의 역할을 구분한다.
-3. 통제 변수는 특정 값으로 고정하지 않고 통계적으로 조정한다.
-4. 조정 전 결과와 조정 후 결과를 구분한다.
-5. 통계 결과와 시각화는 동일한 분석 표본을 사용한다.
-6. Logistic Regression 및 GLM 결과를 인과효과로 표현하지 않는다.
-7. PSM 결과 역시 확정적인 인과효과로 표현하지 않는다.
-8. 범주형 관심 변수는 전체 효과와 개별 범주 효과를 구분한다.
-9. Adjusted Probability와 관측 고소득률을 구분한다.
-10. Adjusted Probability와 머신러닝 개인 예측 확률을 구분한다.
-11. 불안정한 Logistic Regression 결과를 억지로 생성하지 않는다.
-12. 모델 재튜닝 결과가 실질적으로 개선되지 않으면 기존 모델을 유지한다.
-13. 예측확률의 순위 성능과 확률 calibration을 별도로 검증한다.
-14. 명확한 업무 비용 기준 없이 classification threshold를 임의 최적화하지 않는다.
-15. Feature Importance와 What-if를 인과효과로 표현하지 않는다.
-16. 개발용 모델 진단과 사용자용 시각화를 분리한다.
-17. 웹 UI에서 통계 및 머신러닝 로직을 중복 구현하지 않는다.
-
----
-
-# 29. 향후 계획
-
-## Version 1.3 — GUI / UX Refinement
-
-분석 및 예측 기능이 충분히 안정화된 이후 사용자 인터페이스를 정리합니다.
-
-주요 계획:
-
-- 전체 정보 구조 정렬
-- 연관성 분석 결과 섹션 정리
-- 예측 결과 섹션 정리
-- 카드 / 여백 / 버튼 스타일 통일
-- Plotly 그래프 스타일 통일
-- 변수명 표현 방식 통일
-- 오류 및 경고 메시지 정리
-- 반응형 화면 점검
-
-## 이후
-
-- 자동 테스트 범위 확대
-- 문서 최종 정리
-- 배포 환경 구성
-- 서비스 안정성 검증
-
----
-
-# 30. 사용 데이터
-
-**Adult Census Income**
-
-Target:
-
-```text
-high_income
-```
-
-정의:
-
-```text
-income > 50K  → 1
-income <= 50K → 0
-```
-
-본 프로젝트는 실제 연소득 금액을 예측하는 회귀 문제가 아닙니다.
-
-**연 소득 50,000달러 초과 여부의 연관성을 분석하고, 해당 여부를 예측하는 이진 결과 분석·분류 프로젝트입니다.**
+다음 버전에서는 새로운 기능 추가보다 **테스트, 코드 정리, 문서화 및 배포 안정화**를 우선합니다.

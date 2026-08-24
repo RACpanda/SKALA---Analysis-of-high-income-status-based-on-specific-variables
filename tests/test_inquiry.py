@@ -6,6 +6,7 @@ import csv
 
 import pytest
 
+from src.config import APP_VERSION
 from src.inquiry import (
     INQUIRY_CATEGORIES,
     InquiryError,
@@ -27,7 +28,7 @@ def test_create_inquiry_record_contains_required_metadata():
     assert record == {
         "inquiry_id": "INQ-TEST0001",
         "created_at": "2026-08-24T04:00:00Z",
-        "version": "1.4",
+        "version": APP_VERSION,
         "current_page": "내 소득 예측",
         "category": "오류 신고",
         "message": "예측 결과를 확인하는 중 오류가 발생했습니다.",
@@ -76,8 +77,14 @@ def test_invalid_email_is_rejected():
         )
 
 
-def test_save_user_inquiry_creates_and_appends_csv(tmp_path):
-    path = tmp_path / "inquiries" / "user_inquiries.csv"
+def test_save_user_inquiry_creates_and_appends_csv(
+    tmp_path,
+):
+    path = (
+        tmp_path
+        / "inquiries"
+        / "user_inquiries.csv"
+    )
 
     first = create_inquiry_record(
         category="이용 방법 문의",
@@ -86,6 +93,7 @@ def test_save_user_inquiry_creates_and_appends_csv(tmp_path):
         inquiry_id="INQ-1",
         created_at="2026-08-24T04:00:00Z",
     )
+
     second = create_inquiry_record(
         category="기능 개선 요청",
         message="두 번째 문의",
@@ -98,6 +106,7 @@ def test_save_user_inquiry_creates_and_appends_csv(tmp_path):
         first,
         path=path,
     ) == path
+
     save_user_inquiry(
         second,
         path=path,
@@ -114,5 +123,9 @@ def test_save_user_inquiry_creates_and_appends_csv(tmp_path):
     assert [
         row["inquiry_id"]
         for row in rows
-    ] == ["INQ-1", "INQ-2"]
+    ] == [
+        "INQ-1",
+        "INQ-2",
+    ]
+
     assert rows[1]["status"] == "접수"

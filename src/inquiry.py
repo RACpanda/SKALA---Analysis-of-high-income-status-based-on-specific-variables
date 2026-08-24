@@ -21,13 +21,14 @@ from typing import Mapping
 
 import httpx
 
-from src.config import OUTPUT_DIR
+from src.config import (
+    APP_VERSION,
+    INQUIRY_DIR,
+)
 
 
 logger = logging.getLogger(__name__)
 
-
-SERVICE_VERSION = "1.4"
 
 INQUIRY_CATEGORIES = (
     "이용 방법 문의",
@@ -50,11 +51,16 @@ INQUIRY_FIELDS = (
     "status",
 )
 
+INQUIRY_STORAGE_CSV = "csv"
+INQUIRY_STORAGE_SUPABASE = "supabase"
+INQUIRY_TABLE_NAME = "user_inquiries"
+
 DEFAULT_INQUIRY_PATH = (
-    OUTPUT_DIR
-    / "inquiries"
+    INQUIRY_DIR
     / "user_inquiries.csv"
 )
+
+SUPABASE_REQUEST_TIMEOUT_SECONDS = 10.0
 
 _EMAIL_PATTERN = re.compile(
     r"^[^\s@]+@[^\s@]+\.[^\s@]+$"
@@ -99,9 +105,7 @@ def _normalize_email(
     if email is None:
         return ""
 
-    normalized = str(
-        email
-    ).strip()
+    normalized = str(email).strip()
 
     if not normalized:
         return ""
@@ -169,24 +173,21 @@ def create_inquiry_record(
         _normalize_email(email)
     )
 
-    if inquiry_id:
-        record_id = str(
-            inquiry_id
-        ).strip()
-    else:
-        record_id = (
+    record_id = (
+        str(inquiry_id).strip()
+        if inquiry_id
+        else (
             "INQ-"
             + uuid.uuid4()
             .hex[:12]
             .upper()
         )
+    )
 
-    if created_at:
-        timestamp = str(
-            created_at
-        ).strip()
-    else:
-        timestamp = (
+    timestamp = (
+        str(created_at).strip()
+        if created_at
+        else (
             datetime.now(
                 timezone.utc
             )
@@ -198,11 +199,12 @@ def create_inquiry_record(
                 "Z",
             )
         )
+    )
 
     return {
         "inquiry_id": record_id,
         "created_at": timestamp,
-        "version": SERVICE_VERSION,
+        "version": APP_VERSION,
         "current_page": normalized_page,
         "category": normalized_category,
         "message": normalized_message,
@@ -316,8 +318,7 @@ def _save_to_supabase(
         for field in INQUIRY_FIELDS
     }
 
-    # 이메일을 입력하지 않은 경우
-    # 빈 문자열 대신 DB NULL로 저장한다.
+    # 이메일 미입력은 빈 문자열 대신 DB NULL로 저장한다.
     if not str(
         payload.get(
             "email",
@@ -328,7 +329,7 @@ def _save_to_supabase(
 
     endpoint = (
         f"{supabase_url}"
-        "/rest/v1/user_inquiries"
+        f"/rest/v1/{INQUIRY_TABLE_NAME}"
     )
 
     headers = {
@@ -342,7 +343,9 @@ def _save_to_supabase(
             endpoint,
             headers=headers,
             json=payload,
-            timeout=10.0,
+            timeout=(
+                SUPABASE_REQUEST_TIMEOUT_SECONDS
+            ),
         )
 
         response.raise_for_status()
@@ -378,7 +381,9 @@ def _save_to_supabase(
             "문의 저장 중 오류가 발생했습니다."
         ) from exc
 
-    return "supabase:user_inquiries"
+    return (
+        f"supabase:{INQUIRY_TABLE_NAME}"
+    )
 
 
 def get_inquiry_storage_mode() -> str:
@@ -388,14 +393,10 @@ def get_inquiry_storage_mode() -> str:
         _get_secret(
             "INQUIRY_STORAGE_MODE"
         )
-        or "csv"
+        or INQUIRY_STORAGE_CSV
     )
 
-    return (
-        mode
-        .strip()
-        .lower()
-    )
+    return mode.strip().lower()
 
 
 def save_user_inquiry(
@@ -409,31 +410,28 @@ def save_user_inquiry(
     저장 모드와 관계없이 CSV를 사용한다.
     """
 
-    _validate_record(
-        record
-    )
+    _validate_record(record)
 
     if path is not None:
-        destination = Path(
-            path
-        )
-
         return _save_to_csv(
             record,
-            destination,
+            Path(path),
         )
 
     storage_mode = (
         get_inquiry_storage_mode()
     )
 
-    if storage_mode == "csv":
+    if storage_mode == INQUIRY_STORAGE_CSV:
         return _save_to_csv(
             record,
             DEFAULT_INQUIRY_PATH,
         )
 
-    if storage_mode == "supabase":
+    if (
+        storage_mode
+        == INQUIRY_STORAGE_SUPABASE
+    ):
         return _save_to_supabase(
             record
         )

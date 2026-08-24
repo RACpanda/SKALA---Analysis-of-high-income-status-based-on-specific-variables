@@ -6,10 +6,9 @@ association.py와 modeling.py가 반환한 결과 객체와
 필요한 DataFrame을 받아 Plotly Figure로 변환한다.
 
 주요 역할:
-    1. 관심 변수와 high_income의 조정 전 관계 시각화
-    2. Logistic Regression의 조정된 Odds Ratio 시각화
-    3. PSM 수행 시 매칭 전후 공변량 균형 시각화
-    4. 사용자 입력에 대한 고소득 예측 확률 시각화
+    1. Logistic Regression 기반 예상 고소득 비율 시각화
+    2. PSM 수행 시 매칭 전후 공변량 균형 시각화
+    3. 개인 예측 설명·What-if·전체 중요도 시각화
 
 모든 함수는 파일을 저장하지 않고 Figure 객체를 반환한다.
 웹 UI는 반환된 Figure를 직접 표시한다.
@@ -27,11 +26,13 @@ from src.labels import (
     VARIABLE_LABELS,
 )
 
+
 class VisualizationError(ValueError):
     """시각화 입력이나 결과 구조가 올바르지 않을 때 발생하는 오류."""
 
+
 # ============================================================
-# 사용자 표시용 라벨
+# 사용자 표시용 라벨 함수
 # ============================================================
 
 def _variable_label(
@@ -54,6 +55,7 @@ def _category_label(
         .get(variable, {})
         .get(value, str(value))
     )
+
 
 # ============================================================
 # 공통 검증
@@ -150,571 +152,8 @@ def _validate_association_result(
 
 
 # ============================================================
-# 조정 전 연관성 시각화
+# 예상 고소득 비율 시각화
 # ============================================================
-
-def plot_unadjusted_association(
-    result: dict,
-) -> go.Figure:
-    """association.py가 계산한 동일 표본의 조정 전 결과를 시각화한다."""
-
-    _validate_association_result(
-        result
-    )
-
-    request = result["request"]
-    analysis = result["analysis"]
-
-    exposure = request[
-        "exposure"
-    ]
-
-    exposure_type = analysis[
-        "exposure_type"
-    ]
-
-    unadjusted = analysis[
-        "unadjusted"
-    ]
-
-    # --------------------------------------------------------
-    # 이진 관심 변수
-    # --------------------------------------------------------
-
-    if exposure_type == "binary":
-        metadata = unadjusted[
-            "exposure_metadata"
-        ]
-
-        chart_data = pd.DataFrame(
-            {
-                "level": [
-                    metadata[
-                        "reference_level"
-                    ],
-                    metadata[
-                        "comparison_level"
-                    ],
-                ],
-                "sample_size": [
-                    unadjusted[
-                        "reference_n"
-                    ],
-                    unadjusted[
-                        "comparison_n"
-                    ],
-                ],
-                "high_income_rate_percent": [
-                    (
-                        unadjusted[
-                            "reference_rate"
-                        ]
-                        * 100
-                    ),
-                    (
-                        unadjusted[
-                            "comparison_rate"
-                        ]
-                        * 100
-                    ),
-                ],
-            }
-        )
-   
-        chart_data[
-            "display_level"
-        ] = chart_data[
-            "level"
-        ].map(
-            lambda value: (
-                _category_label(
-                    exposure,
-                    value,
-                )
-            )
-        )
-
-        figure = px.bar(
-            chart_data,
-            x="display_level",
-            y="high_income_rate_percent",
-            custom_data=[
-                "sample_size",
-            ],
-            title=(
-                f"{exposure}별 조정 전 고소득률"
-            ),
-            labels={
-                "display_level": (
-                    _variable_label(
-                        exposure
-                    )
-                ),
-                "high_income_rate_percent": (
-                    "연 소득 5만 달러 초과 비율 (%)"
-                ),
-            },
-        )
-
-    # --------------------------------------------------------
-    # 다범주형 관심 변수
-    # --------------------------------------------------------
-
-    elif exposure_type == "categorical":
-        chart_data = pd.DataFrame(
-            unadjusted[
-                "groups"
-            ]
-        )
-
-        chart_data[
-            "high_income_rate_percent"
-        ] = (
-            chart_data[
-                "target_rate"
-            ]
-            * 100
-        )
-
-        chart_data = (
-            chart_data
-            .sort_values(
-                "high_income_rate_percent",
-                ascending=True,
-            )
-        )
-
-        chart_data[
-            "display_level"
-        ] = chart_data[
-            exposure
-        ].map(
-            lambda value: (
-                _category_label(
-                    exposure,
-                    value,
-                )
-            )
-        )
-
-        figure = px.bar(
-            chart_data,
-            x="display_level",
-            y="high_income_rate_percent",
-            custom_data=[
-                "n",
-            ],
-            title=(
-                f"{exposure}별 조정 전 고소득률"
-            ),
-            labels={
-                exposure: exposure,
-                "high_income_rate_percent": (
-                    "고소득률 (%)"
-                ),
-            },
-        )
-
-        figure.update_traces(
-            marker_color="#7C8B6F",
-        )
-
-    # --------------------------------------------------------
-    # 연속형 관심 변수
-    # --------------------------------------------------------
-
-    elif exposure_type == "continuous":
-        chart_data = pd.DataFrame(
-            unadjusted[
-                "bins"
-            ]
-        )
-
-        chart_data[
-            "high_income_rate_percent"
-        ] = (
-            chart_data[
-                "target_rate"
-            ]
-            * 100
-        )
-
-        figure = px.line(
-            chart_data,
-            x="exposure_mean",
-            y="high_income_rate_percent",
-            markers=True,
-            custom_data=[
-                "exposure_min",
-                "exposure_max",
-                "n",
-            ],
-            title=(
-                f"{exposure}와 조정 전 고소득률"
-            ),
-            labels={
-                "exposure_mean": (
-                    f"{exposure} 구간 평균"
-                ),
-                "high_income_rate_percent": (
-                    "고소득률 (%)"
-                ),
-            },
-        )
-
-        figure.update_traces(
-            hovertemplate=(
-                f"{exposure} 평균: %{{x:.2f}}"
-                "<br>구간: "
-                "%{customdata[0]:.2f}"
-                " ~ "
-                "%{customdata[1]:.2f}"
-                "<br>고소득률: %{y:.2f}%"
-                "<br>표본 수: %{customdata[2]:,}"
-                "<extra></extra>"
-            ),
-            line={
-                "color": "#7C8B6F",
-                "width": 3,
-            },
-            marker={
-                "color": "#7C8B6F",
-                "size": 8,
-            },
-        )
-
-        figure.update_yaxes(
-            rangemode="tozero"
-        )
-
-        return figure
-
-    else:
-        raise VisualizationError(
-            "지원하지 않는 관심 변수 유형입니다: "
-            f"{exposure_type}"
-        )
-
-    figure.update_traces(
-        hovertemplate=(
-            "%{x}"
-            "<br>고소득률: %{y:.2f}%"
-            "<br>표본 수: %{customdata[0]:,}"
-            "<extra></extra>"
-        )
-    )
-
-    figure.update_yaxes(
-        rangemode="tozero"
-    )
-
-    return _apply_user_chart_theme(
-        figure,
-        height=420,
-    )
-
-
-# ============================================================
-# 조정 후 Odds Ratio 시각화
-# ============================================================
-
-def _exposure_effect_label(
-    term: str,
-    exposure: str,
-    exposure_type: str,
-    metadata: dict,
-) -> str:
-    """회귀계수 이름을 사용자에게 보여줄 라벨로 변환한다."""
-
-    if exposure_type == "continuous":
-        return (
-            f"{exposure} "
-            "(1단위 증가)"
-        )
-
-    if exposure_type == "binary":
-        reference = (
-            metadata.get(
-                "reference_level"
-            )
-        )
-
-        comparison = (
-            metadata.get(
-                "comparison_level"
-            )
-        )
-
-        if (
-            reference is not None
-            and comparison is not None
-        ):
-            return (
-                f"{comparison} vs "
-                f"{reference}"
-            )
-
-        return exposure
-
-    reference = metadata.get(
-        "reference_level"
-    )
-
-    prefix = (
-        f"{exposure}_"
-    )
-
-    level = (
-        term[len(prefix):]
-        if term.startswith(prefix)
-        else term
-    )
-
-    if reference is None:
-        return str(
-            level
-        )
-
-    return (
-        f"{level} vs {reference}"
-    )
-
-
-def plot_adjusted_association(
-    result: dict,
-) -> go.Figure:
-    """관심 변수의 조정된 Odds Ratio와 95% CI를 forest plot으로 표시한다."""
-
-    _validate_association_result(
-        result
-    )
-
-    request = result[
-        "request"
-    ]
-
-    analysis_result = result[
-        "analysis"
-    ]
-
-    adjusted = analysis_result[
-        "adjusted"
-    ]
-
-    exposure = request[
-        "exposure"
-    ]
-
-    exposure_type = (
-        analysis_result[
-            "exposure_type"
-        ]
-    )
-
-    exposure_effects = (
-        adjusted.get(
-            "exposure_effects",
-            []
-        )
-    )
-
-    if not exposure_effects:
-        raise VisualizationError(
-            "조정된 관심 변수 효과가 없습니다."
-        )
-
-    metadata = (
-        adjusted.get(
-            "exposure_metadata",
-            {}
-        )
-    )
-
-    rows: list[dict] = []
-
-    for effect in exposure_effects:
-        if not effect.get(
-            "estimable",
-            True,
-        ):
-            continue
-
-        if (
-            effect.get(
-                "odds_ratio"
-            )
-            is None
-            or effect.get(
-                "ci_95_low"
-            )
-            is None
-            or effect.get(
-                "ci_95_high"
-            )
-            is None
-        ):
-            continue
-        
-        odds_ratio = float(
-            effect[
-                "odds_ratio"
-            ]
-        )
-
-        ci_low = float(
-            effect[
-                "ci_95_low"
-            ]
-        )
-
-        ci_high = float(
-            effect[
-                "ci_95_high"
-            ]
-        )
-
-        if (
-            odds_ratio <= 0
-            or ci_low <= 0
-            or ci_high <= 0
-        ):
-            raise VisualizationError(
-                "Odds Ratio와 신뢰구간은 "
-                "양수여야 합니다."
-            )
-
-        rows.append(
-            {
-                "label": (
-                    _exposure_effect_label(
-                        term=str(
-                            effect[
-                                "term"
-                            ]
-                        ),
-                        exposure=exposure,
-                        exposure_type=(
-                            exposure_type
-                        ),
-                        metadata=metadata,
-                    )
-                ),
-                "odds_ratio": (
-                    odds_ratio
-                ),
-                "ci_low": (
-                    ci_low
-                ),
-                "ci_high": (
-                    ci_high
-                ),
-                "p_value": float(
-                    effect[
-                        "p_value"
-                    ]
-                ),
-            }
-        )
-
-    if not rows:
-        raise VisualizationError(
-            "관심 변수의 Odds Ratio를 안정적으로 "
-            "추정할 수 있는 범주가 없습니다."
-        )
-
-    chart_data = (
-        pd.DataFrame(
-            rows
-        )
-        .sort_values(
-            "odds_ratio",
-            ascending=True,
-        )
-    )
-
-    error_plus = (
-        chart_data[
-            "ci_high"
-        ]
-        - chart_data[
-            "odds_ratio"
-        ]
-    )
-
-    error_minus = (
-        chart_data[
-            "odds_ratio"
-        ]
-        - chart_data[
-            "ci_low"
-        ]
-    )
-
-    figure = go.Figure()
-
-    figure.add_trace(
-        go.Scatter(
-            x=chart_data[
-                "odds_ratio"
-            ],
-            y=chart_data[
-                "label"
-            ],
-            mode="markers",
-            customdata=np.column_stack(
-                [
-                    chart_data[
-                        "ci_low"
-                    ],
-                    chart_data[
-                        "ci_high"
-                    ],
-                    chart_data[
-                        "p_value"
-                    ],
-                ]
-            ),
-            error_x={
-                "type": "data",
-                "symmetric": False,
-                "array": error_plus,
-                "arrayminus": error_minus,
-            },
-            hovertemplate=(
-                "%{y}"
-                "<br>Adjusted OR: %{x:.3f}"
-                "<br>95% CI: "
-                "%{customdata[0]:.3f}"
-                " – "
-                "%{customdata[1]:.3f}"
-                "<br>p-value: "
-                "%{customdata[2]:.4g}"
-                "<extra></extra>"
-            ),
-            name="Adjusted OR",
-        )
-    )
-
-    figure.add_vline(
-        x=1,
-        line_dash="dash",
-        annotation_text="OR = 1",
-    )
-
-    figure.update_layout(
-        xaxis_title=(
-            "Adjusted Odds Ratio "
-            "(log scale)"
-        ),
-        yaxis_title="",
-        showlegend=False,
-    )
-
-    figure.update_xaxes(
-        type="log"
-    )
-
-    return figure
 
 def plot_adjusted_probability(
     result: dict,
@@ -891,6 +330,7 @@ def plot_adjusted_probability(
         height=430,
     )
 
+
 # ============================================================
 # PSM 균형 시각화
 # ============================================================
@@ -1017,135 +457,15 @@ def plot_psm_balance(
 
 
 # ============================================================
-# 고소득 예측 확률 시각화
-# ============================================================
-
-def plot_prediction_probability(
-    result: dict,
-) -> go.Figure:
-    """한 입력의 고소득 예측 확률을 사용자용 그래프로 표시한다."""
-
-    if not isinstance(
-        result,
-        dict,
-    ):
-        raise VisualizationError(
-            "예측 결과는 dict여야 합니다."
-        )
-
-    prediction = result.get(
-        "prediction"
-    )
-
-    if not isinstance(
-        prediction,
-        dict,
-    ):
-        raise VisualizationError(
-            "예측 결과에 prediction 정보가 없습니다."
-        )
-
-    if (
-        "high_income_probability"
-        not in prediction
-    ):
-        raise VisualizationError(
-            "예측 결과에 고소득 확률이 없습니다."
-        )
-
-    probability = float(
-        prediction[
-            "high_income_probability"
-        ]
-    )
-
-    if not (
-        0 <= probability <= 1
-    ):
-        raise VisualizationError(
-            "고소득 예측 확률은 "
-            "0과 1 사이여야 합니다."
-        )
-
-    chart_data = pd.DataFrame(
-        {
-            "income_class": [
-                "<=50K",
-                ">50K",
-            ],
-            "probability_percent": [
-                (
-                    1
-                    - probability
-                )
-                * 100,
-                probability
-                * 100,
-            ],
-        }
-    )
-
-    figure = px.bar(
-        chart_data,
-        x="probability_percent",
-        y="income_class",
-        orientation="h",
-        text="probability_percent",
-        title="입력 조건의 고소득 예측 확률",
-        labels={
-            "income_class": (
-                "소득 클래스"
-            ),
-            "probability_percent": (
-                "모델 예측 확률 (%)"
-            ),
-        },
-    )
-
-    figure.update_traces(
-        texttemplate="%{text:.1f}%",
-        textposition="outside",
-        hovertemplate=(
-            "%{y}"
-            "<br>예측 확률: %{x:.2f}%"
-            "<extra></extra>"
-        ),
-    )
-
-    figure.update_xaxes(
-        range=[
-            0,
-            100,
-        ]
-    )
-
-    figure.update_layout(
-        showlegend=False
-    )
-
-    return figure
-
-
-# ============================================================
 # 연관성 분석 시각화 묶음
 # ============================================================
 
 def create_association_visualizations(
     result: dict,
 ) -> dict[str, go.Figure]:
-    """한 연관성 분석 결과에 필요한 사용자용 Figure를 생성한다."""
+    """현재 웹 UI에서 실제 사용하는 연관성 Figure만 생성한다."""
 
     figures = {
-        "unadjusted": (
-            plot_unadjusted_association(
-                result
-            )
-        ),
-        "adjusted": (
-            plot_adjusted_association(
-                result
-            )
-        ),
         "adjusted_probability": (
             plot_adjusted_probability(
                 result
@@ -1178,6 +498,11 @@ def create_association_visualizations(
 
     return figures
 
+
+# ============================================================
+# 개인 예측 설명 시각화
+# ============================================================
+
 def plot_prediction_explanation(
     result: dict,
     *,
@@ -1198,21 +523,6 @@ def plot_prediction_explanation(
         raise VisualizationError(
             "개인 예측 설명 데이터가 없습니다."
         )
-
-    feature_labels = {
-        "age": "나이",
-        "workclass": "고용 형태",
-        "education": "교육 수준",
-        "marital-status": "혼인 상태",
-        "occupation": "직업",
-        "relationship": "가구 내 관계",
-        "race": "인종",
-        "sex": "성별",
-        "capital-gain": "투자·자산 이익",
-        "capital-loss": "투자·자산 손실",
-        "hours-per-week": "주당 근무시간",
-        "native-country": "출신 국가",
-    }
 
     chart_data = pd.DataFrame(
         features
@@ -1246,7 +556,9 @@ def plot_prediction_explanation(
         chart_data[
             "feature"
         ]
-        .map(feature_labels)
+        .map(
+            VARIABLE_LABELS
+        )
         .fillna(
             chart_data[
                 "feature"
@@ -1254,10 +566,10 @@ def plot_prediction_explanation(
         )
     )
 
-    # 작은 값은 소수점 자릿수를 늘려 표시
     def format_impact(
         value: float,
     ) -> str:
+        """작은 영향값도 화면에서 구분할 수 있도록 표시한다."""
 
         if abs(value) < 0.001:
             return "0.000%p"
@@ -1281,7 +593,6 @@ def plot_prediction_explanation(
         ].max()
     )
 
-    # x축이 지나치게 좁아지는 것을 방지
     axis_limit = max(
         max_abs_impact * 1.30,
         0.01,
@@ -1356,6 +667,11 @@ def plot_prediction_explanation(
 
     return figure
 
+
+# ============================================================
+# What-if 시각화
+# ============================================================
+
 def plot_what_if_simulation(
     what_if: pd.DataFrame,
     *,
@@ -1407,13 +723,15 @@ def plot_what_if_simulation(
 
         chart_data = what_if.copy()
 
-        chart_data["value"] = (
-            numeric_values
-        )
+        chart_data[
+            "value"
+        ] = numeric_values
 
         chart_data = (
             chart_data
-            .sort_values("value")
+            .sort_values(
+                "value"
+            )
         )
 
         figure = px.line(
@@ -1432,7 +750,6 @@ def plot_what_if_simulation(
             },
         )
 
-        # 현재 입력값 위치 표시
         if current_value is not None:
             try:
                 current_numeric = float(
@@ -1470,7 +787,9 @@ def plot_what_if_simulation(
             )
 
             if korean is None:
-                label = str(value)
+                label = str(
+                    value
+                )
 
             else:
                 label = (
@@ -1510,10 +829,6 @@ def plot_what_if_simulation(
             },
         )
 
-    # ========================================================
-    # 공통 설정
-    # ========================================================
-
     figure.update_yaxes(
         range=[0, 100],
         title=(
@@ -1546,6 +861,11 @@ def plot_what_if_simulation(
 
     return figure
 
+
+# ============================================================
+# 전체 Feature Importance 시각화
+# ============================================================
+
 def plot_global_feature_importance(
     feature_importance: pd.DataFrame,
     *,
@@ -1573,21 +893,6 @@ def plot_global_feature_importance(
             "top_n은 1 이상이어야 합니다."
         )
 
-    feature_labels = {
-        "age": "나이",
-        "workclass": "고용 형태",
-        "education": "교육 수준",
-        "marital-status": "혼인 상태",
-        "occupation": "직업",
-        "relationship": "가구 내 관계",
-        "race": "인종",
-        "sex": "성별",
-        "capital-gain": "투자·자산 이익",
-        "capital-loss": "투자·자산 손실",
-        "hours-per-week": "주당 근무시간",
-        "native-country": "출신 국가",
-    }
-
     chart_data = (
         feature_importance
         .sort_values(
@@ -1609,7 +914,7 @@ def plot_global_feature_importance(
             "feature"
         ]
         .map(
-            feature_labels
+            VARIABLE_LABELS
         )
         .fillna(
             chart_data[
@@ -1663,6 +968,11 @@ def plot_global_feature_importance(
         figure,
         height=460,
     )
+
+
+# ============================================================
+# 공통 Plotly 테마
+# ============================================================
 
 def _apply_user_chart_theme(
     figure: go.Figure,

@@ -1,4 +1,4 @@
-"""Streamlit UI가 기술 예외 내용을 그대로 사용자에게 노출하지 않는지 검증한다."""
+"""Streamlit UI가 내부 예외를 사용자에게 직접 노출하지 않는지 검증한다."""
 
 from __future__ import annotations
 
@@ -11,29 +11,32 @@ PROJECT_ROOT = (
     .parents[1]
 )
 
-APP_PATH = (
-    PROJECT_ROOT
-    / "app.py"
-)
-
-UI_INQUIRY_PATH = (
-    PROJECT_ROOT
-    / "src"
-    / "ui_inquiry.py"
+UI_PATHS = (
+    PROJECT_ROOT / "app.py",
+    (
+        PROJECT_ROOT
+        / "src"
+        / "ui_association.py"
+    ),
+    (
+        PROJECT_ROOT
+        / "src"
+        / "ui_prediction.py"
+    ),
+    (
+        PROJECT_ROOT
+        / "src"
+        / "ui_inquiry.py"
+    ),
 )
 
 
 def _read_ui_sources() -> str:
-    """오류 처리 계약을 확인할 Streamlit UI 소스를 합쳐 반환한다."""
-
-    paths = (
-        APP_PATH,
-        UI_INQUIRY_PATH,
-    )
+    """오류 처리 정책을 확인할 전체 Streamlit UI 소스를 반환한다."""
 
     missing = [
         str(path)
-        for path in paths
+        for path in UI_PATHS
         if not path.exists()
     ]
 
@@ -46,7 +49,7 @@ def _read_ui_sources() -> str:
         path.read_text(
             encoding="utf-8"
         )
-        for path in paths
+        for path in UI_PATHS
     )
 
 

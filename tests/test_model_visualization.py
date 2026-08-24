@@ -1,4 +1,4 @@
-"""src.model_visualization.create_model_visualizations()가 요구 산출물을 생성하는지 검증한다."""
+"""src.model_visualization의 v1.4 산출물 검증·PNG 생성 계약을 검증한다."""
 
 from __future__ import annotations
 
@@ -6,42 +6,91 @@ import json
 
 import numpy as np
 import pandas as pd
+import pytest
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 
 import src.model_visualization as model_visualization
-from src.model_visualization import create_model_visualizations
+from src.model_visualization import (
+    ModelVisualizationError,
+    create_model_visualizations,
+)
+
+
+def _write_consistent_model_outputs() -> None:
+    y_test = np.array([0, 0, 0, 0, 1, 1, 1, 1], dtype=int)
+    y_proba = np.array([0.05, 0.20, 0.40, 0.70, 0.35, 0.60, 0.80, 0.95])
+    y_pred = (y_proba >= 0.50).astype(int)
+
+    predictions = pd.DataFrame(
+        {
+            "row_id": np.arange(len(y_test)),
+            "y_test": y_test,
+            "y_pred": y_pred,
+            "y_proba": y_proba,
+        }
+    )
+
+    metrics = {
+        "test_rows": len(predictions),
+        "accuracy": float(accuracy_score(y_test, y_pred)),
+        "precision": float(precision_score(y_test, y_pred)),
+        "recall": float(recall_score(y_test, y_pred)),
+        "f1": float(f1_score(y_test, y_pred)),
+        "roc_auc": float(roc_auc_score(y_test, y_proba)),
+    }
+
+    model_visualization.MODEL_METRICS_PATH.write_text(
+        json.dumps(metrics),
+        encoding="utf-8",
+    )
+    predictions.to_csv(
+        model_visualization.MODEL_PREDICTIONS_PATH,
+        index=False,
+    )
 
 
 def test_create_model_visualizations_writes_expected_figures():
-    (model_visualization.TABLE_DIR / "model_metrics.json").write_text(
-        json.dumps(
-            {"accuracy": 0.83, "precision": 0.62, "recall": 0.85, "f1": 0.72, "roc_auc": 0.93}
-        ),
-        encoding="utf-8",
-    )
-    rng = np.random.default_rng(0)
-    n = 100
-    y_test = rng.integers(0, 2, size=n)
-    predictions = pd.DataFrame(
-        {
-            "row_id": range(n),
-            "y_test": y_test,
-            "y_pred": rng.integers(0, 2, size=n),
-            "y_proba": np.clip(y_test * 0.6 + rng.random(n) * 0.4, 0, 1),
-        }
-    )
-    predictions.to_csv(model_visualization.TABLE_DIR / "model_predictions.csv", index=False)
+    _write_consistent_model_outputs()
 
-    create_model_visualizations()
+    outputs = create_model_visualizations()
 
-    for filename in [
+    assert set(outputs) == {
+        "performance_metrics",
+        "roc_curve",
+        "confusion_matrix",
+    }
+
+    expected_names = {
         "model_performance_metrics.png",
         "model_roc_curve.png",
         "model_confusion_matrix.png",
-    ]:
-        path = model_visualization.FIGURE_DIR / filename
-        assert path.exists() and path.stat().st_size > 0
+    }
+    assert {path.name for path in outputs.values()} == expected_names
+    assert all(path.exists() and path.stat().st_size > 0 for path in outputs.values())
 
 
-def test_create_model_visualizations_skips_gracefully_without_model_outputs():
-    # model 단계를 아직 안 돌렸으면 예외 없이 경고만 출력하고 넘어가야 한다.
-    create_model_visualizations()
+def test_create_model_visualizations_rejects_missing_model_outputs():
+    with pytest.raises(ModelVisualizationError, match="모델 평가 지표 파일"):
+        create_model_visualizations()
+
+
+def test_create_model_visualizations_rejects_inconsistent_metrics():
+    _write_consistent_model_outputs()
+
+    metrics = json.loads(
+        model_visualization.MODEL_METRICS_PATH.read_text(encoding="utf-8")
+    )
+    metrics["accuracy"] = 0.0
+    model_visualization.MODEL_METRICS_PATH.write_text(
+        json.dumps(metrics),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ModelVisualizationError, match="서로 일치하지 않습니다"):
+        create_model_visualizations()

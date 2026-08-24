@@ -1,0 +1,45 @@
+{
+  "version": "1.2",
+  "experiment": "probability_calibration",
+  "outer_cv_folds": 5,
+  "calibration_cv_folds": 3,
+  "calibration_bins": 10,
+  "evaluation_strategy": "nested_out_of_fold_on_training_data",
+  "train_rows": 26029,
+  "reserved_test_rows": 6508,
+  "model_params": {
+    "learning_rate": 0.14447746112718687,
+    "max_depth": 5,
+    "max_iter": 154,
+    "l2_regularization": 0.45606998421703593
+  },
+  "results": {
+    "uncalibrated": {
+      "roc_auc": 0.925759193012682,
+      "brier_score": 0.11117135473222424,
+      "log_loss": 0.3375916064510817,
+      "actual_positive_rate": 0.24092358523185678,
+      "mean_predicted_probability": 0.3459188937495233,
+      "mean_probability_bias": 0.1049953085176665,
+      "elapsed_seconds": 1.9328239579999718
+    },
+    "sigmoid": {
+      "roc_auc": 0.9262218635636311,
+      "brier_score": 0.0899870933324622,
+      "log_loss": 0.28283876047427625,
+      "actual_positive_rate": 0.24092358523185678,
+      "mean_predicted_probability": 0.2409483370851482,
+      "mean_probability_bias": 2.475185329142704e-05,
+      "elapsed_seconds": 2.5372268329997496
+    },
+    "isotonic": {
+      "roc_auc": 0.9258401962744586,
+      "brier_score": 0.08997295273885156,
+      "log_loss": 0.2861275446960405,
+      "actual_positive_rate": 0.24092358523185678,
+      "mean_predicted_probability": 0.24095153468435812,
+      "mean_probability_bias": 2.7949452501341288e-05,
+      "elapsed_seconds": 1.5182172919999175
+    }
+  }
+}

@@ -1,69 +1,88 @@
-"""src.statistics의 Welch t-test와 성향점수매칭(PSM)을 합성 데이터로 검증한다."""
+"""src.statistics의 v1.4 이진 집단 비교와 PSM 계약을 검증한다."""
 
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
-from src.statistics import propensity_score_matching, welch_test
+from src.statistics import (
+    binary_group_association,
+    propensity_score_matching,
+)
 
 
-def test_welch_test_detects_clear_income_gap():
+def test_binary_group_association_detects_clear_rate_gap():
     df = pd.DataFrame(
         {
-            "college_degree": [1] * 20 + [0] * 20,
-            "high_income": [1] * 16 + [0] * 4 + [1] * 4 + [0] * 16,
+            "sex": ["Female"] * 20 + ["Male"] * 20,
+            "high_income": [1] * 4 + [0] * 16 + [1] * 16 + [0] * 4,
         }
     )
 
-    result = welch_test(df)
+    result = binary_group_association(df, exposure="sex")
+    analysis = result["analysis"]
 
-    assert result["degree_mean"] > result["no_degree_mean"]
-    assert result["p_value"] < 0.05
-    assert result["significant_at_0_05"] is True
+    assert analysis["exposure_metadata"] == {
+        "reference_level": "Female",
+        "comparison_level": "Male",
+    }
+    assert analysis["comparison_rate"] > analysis["reference_rate"]
+    assert analysis["rate_difference"] > 0
+    assert analysis["fisher_exact_p_value"] < 0.05
+    assert analysis["odds_ratio"] > 1
 
 
-def test_welch_test_reports_no_gap_for_identical_groups():
+def test_binary_group_association_reports_zero_gap_for_identical_rates():
     df = pd.DataFrame(
         {
-            "college_degree": [1] * 20 + [0] * 20,
+            "sex": ["Female"] * 20 + ["Male"] * 20,
             "high_income": ([1] * 10 + [0] * 10) * 2,
         }
     )
 
-    result = welch_test(df)
+    analysis = binary_group_association(
+        df,
+        exposure="sex",
+    )["analysis"]
 
-    assert result["mean_difference"] == 0
-    assert result["significant_at_0_05"] is False
+    assert analysis["rate_difference"] == 0
+    assert analysis["fisher_exact_p_value"] == 1.0
 
 
-def test_propensity_score_matching_balances_covariates():
-    rng = np.random.default_rng(42)
-    n = 200
-    age = rng.integers(20, 60, size=n)
-    sex = rng.choice(["Male", "Female"], size=n)
-    race = rng.choice(["White", "Black"], size=n)
-    country = rng.choice(["United-States", "Mexico"], size=n)
-    # 배경(age)이 클수록 학위를 가질 확률이 높고, 학위가 있으면 고소득 확률도 높게 만든다.
-    college_degree = (age + rng.normal(0, 5, size=n) > 45).astype(int)
-    high_income = ((college_degree == 1) & (rng.random(n) < 0.6)) | (
-        (college_degree == 0) & (rng.random(n) < 0.2)
+def test_propensity_score_matching_returns_pairs_and_improves_balance(
+    association_frame,
+):
+    matched, balance, result = propensity_score_matching(
+        association_frame,
+        exposure="sex",
+        covariates=["age", "race"],
+        outcome="high_income",
     )
 
-    df = pd.DataFrame(
-        {
-            "age": age,
-            "sex": sex,
-            "race": race,
-            "native-country": country,
-            "college_degree": college_degree,
-            "high_income": high_income.astype(int),
-        }
+    matched_pairs = result["matching"]["matched_pairs"]
+
+    assert matched_pairs >= 2
+    assert len(matched) == matched_pairs * 2
+    assert set(matched["matched_role"]) == {"comparison", "reference"}
+    assert matched.groupby("pair_id").size().eq(2).all()
+
+    # 현재 구현은 replacement를 사용하지 않으므로 기준집단 원본 행은 중복되지 않는다.
+    reference_sources = matched.loc[
+        matched["matched_role"] == "reference",
+        "source_index",
+    ]
+    assert reference_sources.is_unique
+
+    assert {"covariate", "smd_before", "smd_after"}.issubset(balance.columns)
+    assert result["balance"]["max_smd_after"] < result["balance"]["max_smd_before"]
+    assert result["balance"]["max_smd_after"] < 0.1
+
+    # 실제 매칭 거리는 계산된 caliper 안에 있어야 한다.
+    comparison_distances = matched.loc[
+        matched["matched_role"] == "comparison",
+        "match_distance",
+    ].to_numpy(dtype=float)
+    assert np.all(
+        comparison_distances
+        <= result["matching"]["caliper"] + 1e-12
     )
-
-    matched, result = propensity_score_matching(df, output_prefix="test_psm")
-
-    assert result["matched_pairs"] > 0
-    assert len(matched) == result["matched_pairs"] * 2
-    # 매칭 후에는 처리/대조 집단의 공변량 불균형(SMD)이 매칭 전보다 작거나 같아야 한다.
-    assert result["max_smd_after"] <= result["max_smd_before"]

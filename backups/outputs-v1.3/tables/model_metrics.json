@@ -11,6 +11,6 @@
   "brier_score": 0.0848071405360091,
   "log_loss": 0.2703683335933366,
   "actual_positive_rate": 0.24093423478795328,
-  "mean_predicted_probability": 0.2438758576190289,
-  "mean_probability_bias": 0.00294162283107563
+  "mean_predicted_probability": 0.24387585761902897,
+  "mean_probability_bias": 0.0029416228310756853
 }

@@ -6,12 +6,15 @@
     3. 개인 예측 설명
     4. What-if 시뮬레이션
     5. 전체 모델 기준 Feature Importance 확인
+    6. 사용자 문의 접수
 
 분석과 예측 계산은 src 모듈이 담당하며,
 이 파일은 Streamlit UI와 결과 표시만 담당한다.
 """
 
 from __future__ import annotations
+
+import logging
 
 import pandas as pd
 import streamlit as st
@@ -26,6 +29,12 @@ from src.config import (
     ANALYSIS_VARIABLES,
 )
 from src.data import load_and_clean
+from src.inquiry import (
+    INQUIRY_CATEGORIES,
+    InquiryError,
+    create_inquiry_record,
+    save_user_inquiry,
+)
 from src.modeling import (
     ModelingError,
     get_global_feature_importance,
@@ -33,6 +42,8 @@ from src.modeling import (
     predict_income_input,
     simulate_income_what_if,
 )
+logger = logging.getLogger(__name__)
+
 from src.visualization import (
     VisualizationError,
     create_association_visualizations,
@@ -1301,10 +1312,50 @@ def display_adjusted_result(
         [],
     )
 
-    for warning in warnings:
-        st.warning(
-            warning
-        )
+    if warnings:
+        unstable_labels = []
+
+        for effect in effects:
+            if effect.get(
+                "estimable",
+                True,
+            ):
+                continue
+
+            term = str(
+                effect.get(
+                    "term",
+                    "",
+                )
+            )
+
+            prefix = f"{exposure}_"
+
+            if term.startswith(
+                prefix
+            ):
+                raw_value = term[
+                    len(prefix):
+                ]
+                label = (
+                    CATEGORY_VALUE_LABELS
+                    .get(exposure, {})
+                    .get(raw_value, raw_value)
+                )
+                unstable_labels.append(label)
+
+        if unstable_labels:
+            st.warning(
+                "일부 범주는 데이터 수가 적거나 "
+                "결과가 한쪽에 치우쳐 있어 "
+                "개별 효과를 안정적으로 계산하기 어렵습니다. "
+                f"해당 범주: {', '.join(unstable_labels)}"
+            )
+        else:
+            st.warning(
+                "일부 범주는 데이터가 충분하지 않아 "
+                "개별 효과를 안정적으로 계산하기 어렵습니다."
+            )
 
 # ============================================================
 # PSM 결과
@@ -2200,9 +2251,17 @@ def prediction_page() -> None:
         schema = (
             load_prediction_schema()
         )
-    except ModelingError as exc:
+    except ModelingError:
+        logger.exception(
+            "예측 입력 스키마 로드 실패"
+        )
         st.error(
-            str(exc)
+            "예측 서비스를 준비하지 못했습니다. "
+            "잠시 후 다시 시도해 주세요."
+        )
+        st.caption(
+            "문제가 계속되면 페이지 하단의 문의하기에서 "
+            "오류 신고로 알려주세요."
         )
         return
 
@@ -2440,9 +2499,17 @@ def prediction_page() -> None:
                     )
                 )
 
-        except ModelingError as exc:
+        except ModelingError:
+            logger.exception(
+                "개인 소득 예측 실행 실패"
+            )
             st.error(
-                str(exc)
+                "예측 결과를 계산하지 못했습니다. "
+                "입력값을 확인한 뒤 다시 시도해 주세요."
+            )
+            st.caption(
+                "같은 문제가 반복되면 페이지 하단의 문의하기에서 "
+                "오류 신고로 알려주세요."
             )
             return
 
@@ -2620,9 +2687,13 @@ def prediction_page() -> None:
                 width="stretch",
             )
 
-        except VisualizationError as exc:
+        except VisualizationError:
+            logger.exception(
+                "개인 예측 설명 그래프 생성 실패"
+            )
             st.warning(
-                f"입력값 비교 그래프를 표시하지 못했습니다: {exc}"
+                "입력값 비교 그래프를 표시하지 못했습니다. "
+                "예측 결과 자체는 그대로 확인할 수 있습니다."
             )
 
         st.caption(
@@ -2673,9 +2744,13 @@ def prediction_page() -> None:
     except (
         ModelingError,
         VisualizationError,
-    ) as exc:
+    ):
+        logger.exception(
+            "전체 모델 중요도 표시 실패"
+        )
         st.warning(
-            f"예측 중요도를 표시하지 못했습니다: {exc}"
+            "모델 중요도 그래프를 표시하지 못했습니다. "
+            "개인 예측 결과는 그대로 사용할 수 있습니다."
         )
 
     st.caption(
@@ -2766,9 +2841,17 @@ def prediction_page() -> None:
         except (
             ModelingError,
             VisualizationError,
-        ) as exc:
+        ):
+            logger.exception(
+                "What-if 시뮬레이션 실행 실패"
+            )
             st.error(
-                str(exc)
+                "조건 변경 결과를 계산하지 못했습니다. "
+                "다른 항목을 선택한 뒤 다시 시도해 주세요."
+            )
+            st.caption(
+                "문제가 반복되면 페이지 하단의 문의하기에서 "
+                "오류 신고로 알려주세요."
             )
 
         else:
@@ -2813,6 +2896,126 @@ def prediction_page() -> None:
         )
 
 # ============================================================
+# 사용자 문의
+# ============================================================
+
+def render_inquiry_form(
+    current_page: str,
+) -> None:
+    """문의 입력 폼을 표시하고 검증된 문의를 저장한다."""
+
+    with st.form(
+        "user_inquiry_form",
+        clear_on_submit=True,
+        border=True,
+    ):
+        category = st.selectbox(
+            "문의 유형",
+            options=list(INQUIRY_CATEGORIES),
+        )
+        message = st.text_area(
+            "문의 내용",
+            placeholder=(
+                "궁금한 점, 오류 상황, 불편한 점 또는 "
+                "개선 의견을 적어주세요."
+            ),
+            height=160,
+            max_chars=5000,
+        )
+        email = st.text_input(
+            "답변 받을 이메일 (선택)",
+            placeholder="name@example.com",
+        )
+        st.caption(
+            "이메일을 입력하면 문의 기록에 함께 저장됩니다. "
+            "답변이 필요한 경우에만 입력해 주세요."
+        )
+        submitted = st.form_submit_button(
+            "문의 보내기",
+            type="primary",
+            width="stretch",
+        )
+
+    if not submitted:
+        return
+
+    try:
+        record = create_inquiry_record(
+            category=category,
+            message=message,
+            current_page=current_page,
+            email=email,
+        )
+        save_user_inquiry(record)
+    except InquiryError as exc:
+        st.warning(str(exc))
+        return
+    except OSError:
+        logger.exception(
+            "사용자 문의 저장 실패"
+        )
+        st.error(
+            "문의를 저장하는 중 문제가 발생했습니다. "
+            "잠시 후 다시 시도해 주세요."
+        )
+        return
+
+    st.session_state["inquiry_success_id"] = record["inquiry_id"]
+    st.session_state["inquiry_open"] = False
+    st.rerun()
+
+
+def render_inquiry_section(
+    current_page: str,
+) -> None:
+    """모든 서비스 페이지 하단에 공통 문의 진입점을 표시한다."""
+
+    st.divider()
+    success_id = st.session_state.pop(
+        "inquiry_success_id",
+        None,
+    )
+    if success_id:
+        st.success(
+            "문의가 접수되었습니다. "
+            f"문의 번호: {success_id}"
+        )
+
+    text_col, button_col = st.columns(
+        [3, 1],
+        vertical_alignment="center",
+    )
+    with text_col:
+        st.subheader(
+            "서비스 이용에 도움이 필요하신가요?"
+        )
+        st.caption(
+            "사용 중 궁금한 점이나 불편한 점, "
+            "오류 또는 개선 의견을 보내주세요."
+        )
+    with button_col:
+        if st.button(
+            "문의하기",
+            key="open_inquiry_button",
+            width="stretch",
+        ):
+            st.session_state["inquiry_open"] = (
+                not st.session_state.get(
+                    "inquiry_open",
+                    False,
+                )
+            )
+
+    if st.session_state.get(
+        "inquiry_open",
+        False,
+    ):
+        render_inquiry_form(
+            current_page=current_page,
+        )
+
+
+# ============================================================
 # 앱 실행
 # ============================================================
 
@@ -2821,6 +3024,9 @@ def display_association_error(
 ) -> None:
     """연관성 분석 실패 원인을 사용자 친화적으로 안내한다."""
 
+    logger.exception(
+        "연관성 분석 실행 실패"
+    )
     message = str(exc)
 
     if (
@@ -2852,12 +3058,20 @@ def display_association_error(
             """
         )
 
-        with st.expander("기술적 상세 정보"):
-            st.code(message)
-
+        st.caption(
+            "같은 문제가 반복되면 페이지 하단의 문의하기에서 "
+            "오류 신고로 알려주세요."
+        )
         return
 
-    st.error(message)
+    st.error(
+        "분석을 완료하지 못했습니다. "
+        "변수 선택을 확인한 뒤 다시 시도해 주세요."
+    )
+    st.caption(
+        "문제가 반복되면 페이지 하단의 문의하기에서 "
+        "오류 신고로 알려주세요."
+    )
 
 def render_hero() -> None:
     """서비스의 상단 소개 영역을 표시한다."""
@@ -2889,10 +3103,16 @@ def main() -> None:
 
     try:
         df = (load_service_data())
-    except Exception as exc:
+    except Exception:
+        logger.exception(
+            "서비스 데이터 로드 실패"
+        )
         st.error(
-            "Adult 데이터를 불러오지 못했습니다: "
-            f"{exc}"
+            "서비스 데이터를 불러오지 못했습니다. "
+            "잠시 후 다시 시도해 주세요."
+        )
+        st.caption(
+            "문제가 계속되면 관리자에게 문의해 주세요."
         )
         st.stop()
 
@@ -2972,6 +3192,12 @@ def main() -> None:
 
     else:
         prediction_page()
+
+    render_inquiry_section(
+        current_page=st.session_state[
+            "service_mode"
+        ],
+    )
 
 if __name__ == "__main__":
     main()

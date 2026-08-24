@@ -22,6 +22,10 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
+from src.labels import (
+    CATEGORY_VALUE_LABELS,
+    VARIABLE_LABELS,
+)
 
 class VisualizationError(ValueError):
     """시각화 입력이나 결과 구조가 올바르지 않을 때 발생하는 오류."""
@@ -29,76 +33,6 @@ class VisualizationError(ValueError):
 # ============================================================
 # 사용자 표시용 라벨
 # ============================================================
-
-VARIABLE_LABELS = {
-    "age": "나이",
-    "workclass": "고용 형태",
-    "education": "교육 수준",
-    "marital-status": "혼인 상태",
-    "occupation": "직업",
-    "relationship": "가구 내 관계",
-    "race": "인종",
-    "sex": "성별",
-    "capital-gain": "투자·자산 이익",
-    "capital-loss": "투자·자산 손실",
-    "hours-per-week": "주당 근무시간",
-    "native-country": "출신 국가",
-}
-
-
-CATEGORY_VALUE_LABELS = {
-    "sex": {
-        "Male": "남성",
-        "Female": "여성",
-    },
-
-    "race": {
-        "White": "백인",
-        "Black": "흑인",
-        "Asian-Pac-Islander": "아시아·태평양계",
-        "Amer-Indian-Eskimo": "아메리카 원주민",
-        "Other": "기타",
-    },
-
-    "relationship": {
-        "Husband": "남편",
-        "Wife": "아내",
-        "Own-child": "자녀",
-        "Not-in-family": "가족 외",
-        "Other-relative": "기타 친족",
-        "Unmarried": "미혼·비혼",
-    },
-
-    "workclass": {
-        "Private": "민간 기업",
-        "Self-emp-not-inc": "자영업·비법인",
-        "Self-emp-inc": "자영업·법인",
-        "Federal-gov": "연방정부",
-        "Local-gov": "지방정부",
-        "State-gov": "주정부",
-        "Without-pay": "무급 근무",
-        "Never-worked": "근무 경험 없음",
-    },
-
-    "education": {
-        "Preschool": "취학 전",
-        "1st-4th": "초등 1~4학년",
-        "5th-6th": "초등 5~6학년",
-        "7th-8th": "중학교 수준",
-        "9th": "9학년",
-        "10th": "10학년",
-        "11th": "11학년",
-        "12th": "12학년",
-        "HS-grad": "고등학교 졸업",
-        "Some-college": "대학 일부 이수",
-        "Assoc-voc": "전문학사·직업 과정",
-        "Assoc-acdm": "전문학사·학술 과정",
-        "Bachelors": "학사",
-        "Masters": "석사",
-        "Prof-school": "전문대학원",
-        "Doctorate": "박사",
-    },
-}
 
 def _variable_label(
     variable: str,

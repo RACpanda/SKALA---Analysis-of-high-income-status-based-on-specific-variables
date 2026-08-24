@@ -55,7 +55,7 @@
 
 ## 산출물 위치
 
-- `outputs/models/income_pipeline.joblib` — 학습된 파이프라인
+- `outputs/models/income_model_bundle.joblib` — 학습된 파이프라인
 - `outputs/tables/model_metrics.json` — 위 성능 지표
 - `outputs/tables/model_feature_importance.csv` — 전체 피처 중요도
 - `outputs/tables/model_fairness_by_group.csv` — 전체 집단별 진단

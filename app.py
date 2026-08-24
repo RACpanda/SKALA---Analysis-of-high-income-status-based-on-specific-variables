@@ -29,11 +29,16 @@ from src.config import (
     ANALYSIS_VARIABLES,
 )
 from src.data import load_and_clean
-from src.inquiry import (
-    INQUIRY_CATEGORIES,
-    InquiryError,
-    create_inquiry_record,
-    save_user_inquiry,
+from src.ui_common import (
+    category_value_label,
+    display_interpretation_note,
+    format_p_value,
+    format_percent,
+    result_value_label,
+    variable_label,
+)
+from src.ui_inquiry import (
+    render_inquiry_section,
 )
 from src.labels import (
     CATEGORY_VALUE_LABELS,
@@ -251,40 +256,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-
-# ============================================================
-# 사용자 표시용 변수 이름
-# ============================================================
-def _category_value_label(
-    feature: str,
-    value: str,
-) -> str:
-    """범주 값을 한글(영어) 형식으로 표시한다."""
-
-    korean = (
-        CATEGORY_VALUE_LABELS
-        .get(feature, {})
-        .get(value)
-    )
-
-    if korean is None:
-        return str(value)
-
-    return f"{korean} ({value})"
-
-def _variable_label(
-    variable: str,
-) -> str:
-    """변수명을 사용자 표시용 이름으로 변환한다."""
-
-    korean = VARIABLE_LABELS.get(
-        variable,
-        variable,
-    )
-
-    return (f"{korean} ({variable})")
-
-
 # ============================================================
 # 데이터 및 모델 메타데이터 캐시
 # ============================================================
@@ -306,73 +277,6 @@ def load_global_importance() -> pd.DataFrame:
     """현재 저장된 모델의 전체 permutation importance를 반환한다."""
 
     return (get_global_feature_importance())
-
-# ============================================================
-# 공통 표시 함수
-# ============================================================
-
-def _format_p_value(
-    value: float | None,
-) -> str:
-    """p-value를 화면에 적절한 문자열로 표시한다."""
-
-    if value is None:
-        return "추정 불가"
-
-    value = float(value)
-
-    if value < 0.001:
-        return f"{value:.2e}"
-
-    return f"{value:.4f}"
-
-
-def _format_percent(
-    value: float | None,
-) -> str:
-    """0~1 비율을 백분율 문자열로 변환한다."""
-
-    if value is None:
-        return "-"
-
-    return (f"{float(value) * 100:.2f}%")
-
-
-def _display_interpretation_note(
-    text: str,
-) -> None:
-    """해석상 주의 문구를 공통 스타일로 표시한다."""
-
-    st.markdown(
-        (
-            '<div class="interpretation-box">'
-            f"{text}"
-            "</div>"
-        ),
-        unsafe_allow_html=True,
-    )
-
-def _result_value_label(
-    variable: str,
-    value,
-) -> str:
-    """분석 결과의 범주 값을 사용자 표시용 이름으로 변환한다."""
-
-    labels = globals().get(
-        "CATEGORY_VALUE_LABELS",
-        {},
-    )
-
-    korean = (
-        labels
-        .get(variable, {})
-        .get(value)
-    )
-
-    if korean is None:
-        return str(value)
-
-    return f"{korean} ({value})"
 
 # ============================================================
 # 조정 전 결과
@@ -474,7 +378,7 @@ def display_unadjusted_result(
             with detail_right:
                 st.metric(
                     "p-value",
-                    _format_p_value(
+                    format_p_value(
                         p_value
                     ),
                 )
@@ -503,14 +407,14 @@ def display_unadjusted_result(
         ]
 
         reference_label = (
-            _result_value_label(
+            result_value_label(
                 exposure,
                 reference,
             )
         )
 
         comparison_label = (
-            _result_value_label(
+            result_value_label(
                 exposure,
                 comparison,
             )
@@ -571,7 +475,7 @@ def display_unadjusted_result(
         with col1:
             st.metric(
                 reference_label,
-                _format_percent(
+                format_percent(
                     reference_rate
                 ),
             )
@@ -579,7 +483,7 @@ def display_unadjusted_result(
         with col2:
             st.metric(
                 comparison_label,
-                _format_percent(
+                format_percent(
                     comparison_rate
                 ),
             )
@@ -640,7 +544,7 @@ def display_unadjusted_result(
 
             st.write(
                 "Fisher exact test p-value · "
-                f"{_format_p_value(unadjusted['fisher_exact_p_value'])}"
+                f"{format_p_value(unadjusted['fisher_exact_p_value'])}"
             )
 
 
@@ -670,14 +574,14 @@ def display_unadjusted_result(
         ]
 
         highest_label = (
-            _result_value_label(
+            result_value_label(
                 exposure,
                 highest[exposure],
             )
         )
 
         lowest_label = (
-            _result_value_label(
+            result_value_label(
                 exposure,
                 lowest[exposure],
             )
@@ -697,9 +601,9 @@ def display_unadjusted_result(
                 f"{exposure_label}에 따라 연 소득 5만 달러를 "
                 "넘는 비율에 차이가 나타났습니다. "
                 f"가장 높은 범주는 {highest_label}"
-                f"({_format_percent(highest_rate)}), "
+                f"({format_percent(highest_rate)}), "
                 f"가장 낮은 범주는 {lowest_label}"
-                f"({_format_percent(lowest_rate)})입니다."
+                f"({format_percent(lowest_rate)})입니다."
             )
 
         else:
@@ -727,7 +631,7 @@ def display_unadjusted_result(
             exposure
         ].map(
             lambda value: (
-                _result_value_label(
+                result_value_label(
                     exposure,
                     value,
                 )
@@ -789,7 +693,7 @@ def display_unadjusted_result(
             with col2:
                 st.metric(
                     "p-value",
-                    _format_p_value(
+                    format_p_value(
                         p_value
                     ),
                 )
@@ -960,7 +864,7 @@ def display_adjusted_result(
         ):
             st.metric(
                 "p-value",
-                _format_p_value(
+                format_p_value(
                     p_value
                 ),
             )
@@ -1009,14 +913,14 @@ def display_adjusted_result(
 
         # 앞에서 만든 한글(영어) 표시 함수 재사용
         reference_label = (
-            _category_value_label(
+            category_value_label(
                 exposure,
                 reference,
             )
         )
 
         comparison_label = (
-            _category_value_label(
+            category_value_label(
                 exposure,
                 comparison,
             )
@@ -1072,7 +976,7 @@ def display_adjusted_result(
         ):
             st.metric(
                 "p-value",
-                _format_p_value(
+                format_p_value(
                     p_value
                 ),
             )
@@ -1132,7 +1036,7 @@ def display_adjusted_result(
                 with detail_left:
                     st.metric(
                         "p-value",
-                        _format_p_value(
+                        format_p_value(
                             p_value
                         ),
                     )
@@ -1258,7 +1162,7 @@ def display_psm_result(
     with col3:
         st.metric(
             "McNemar p-value",
-            _format_p_value(
+            format_p_value(
                 outcome[
                     "mcnemar_p_value"
                 ]
@@ -1931,7 +1835,7 @@ def association_page(
                 width="stretch",
             )
 
-        _display_interpretation_note(
+        display_interpretation_note(
             psm[
                 "result"
             ][
@@ -2001,7 +1905,7 @@ def _continuous_input_widget(
     if integer_like:
         return float(
             st.number_input(
-                _variable_label(
+                variable_label(
                     feature
                 ),
                 min_value=int(
@@ -2022,7 +1926,7 @@ def _continuous_input_widget(
 
     return float(
         st.number_input(
-            _variable_label(
+            variable_label(
                 feature
             ),
             min_value=minimum,
@@ -2068,7 +1972,7 @@ def _categorical_input_widget(
         options=levels,
         index=default_index,
         format_func=lambda value: (
-            _category_value_label(
+            category_value_label(
                 feature,
                 value,
             )
@@ -2747,126 +2651,6 @@ def prediction_page() -> None:
             "실제로 해당 조건을 바꾸면 소득이 이렇게 "
             "변한다는 뜻은 아닙니다."
         )
-
-# ============================================================
-# 사용자 문의
-# ============================================================
-
-def render_inquiry_form(
-    current_page: str,
-) -> None:
-    """문의 입력 폼을 표시하고 검증된 문의를 저장한다."""
-
-    with st.form(
-        "user_inquiry_form",
-        clear_on_submit=True,
-        border=True,
-    ):
-        category = st.selectbox(
-            "문의 유형",
-            options=list(INQUIRY_CATEGORIES),
-        )
-        message = st.text_area(
-            "문의 내용",
-            placeholder=(
-                "궁금한 점, 오류 상황, 불편한 점 또는 "
-                "개선 의견을 적어주세요."
-            ),
-            height=160,
-            max_chars=5000,
-        )
-        email = st.text_input(
-            "답변 받을 이메일 (선택)",
-            placeholder="name@example.com",
-        )
-        st.caption(
-            "이메일을 입력하면 문의 기록에 함께 저장됩니다. "
-            "답변이 필요한 경우에만 입력해 주세요."
-        )
-        submitted = st.form_submit_button(
-            "문의 보내기",
-            type="primary",
-            width="stretch",
-        )
-
-    if not submitted:
-        return
-
-    try:
-        record = create_inquiry_record(
-            category=category,
-            message=message,
-            current_page=current_page,
-            email=email,
-        )
-        save_user_inquiry(record)
-    except InquiryError as exc:
-        st.warning(str(exc))
-        return
-    except OSError:
-        logger.exception(
-            "사용자 문의 저장 실패"
-        )
-        st.error(
-            "문의를 저장하는 중 문제가 발생했습니다. "
-            "잠시 후 다시 시도해 주세요."
-        )
-        return
-
-    st.session_state["inquiry_success_id"] = record["inquiry_id"]
-    st.session_state["inquiry_open"] = False
-    st.rerun()
-
-
-def render_inquiry_section(
-    current_page: str,
-) -> None:
-    """모든 서비스 페이지 하단에 공통 문의 진입점을 표시한다."""
-
-    st.divider()
-    success_id = st.session_state.pop(
-        "inquiry_success_id",
-        None,
-    )
-    if success_id:
-        st.success(
-            "문의가 접수되었습니다. "
-            f"문의 번호: {success_id}"
-        )
-
-    text_col, button_col = st.columns(
-        [3, 1],
-        vertical_alignment="center",
-    )
-    with text_col:
-        st.subheader(
-            "서비스 이용에 도움이 필요하신가요?"
-        )
-        st.caption(
-            "사용 중 궁금한 점이나 불편한 점, "
-            "오류 또는 개선 의견을 보내주세요."
-        )
-    with button_col:
-        if st.button(
-            "문의하기",
-            key="open_inquiry_button",
-            width="stretch",
-        ):
-            st.session_state["inquiry_open"] = (
-                not st.session_state.get(
-                    "inquiry_open",
-                    False,
-                )
-            )
-
-    if st.session_state.get(
-        "inquiry_open",
-        False,
-    ):
-        render_inquiry_form(
-            current_page=current_page,
-        )
-
 
 # ============================================================
 # 앱 실행

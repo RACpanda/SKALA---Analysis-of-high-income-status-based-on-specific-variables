@@ -5,11 +5,53 @@ from __future__ import annotations
 from pathlib import Path
 
 
-APP_PATH = Path(__file__).resolve().parents[1] / "app.py"
+PROJECT_ROOT = (
+    Path(__file__)
+    .resolve()
+    .parents[1]
+)
+
+APP_PATH = (
+    PROJECT_ROOT
+    / "app.py"
+)
+
+UI_INQUIRY_PATH = (
+    PROJECT_ROOT
+    / "src"
+    / "ui_inquiry.py"
+)
 
 
-def test_app_does_not_render_raw_exception_text_for_service_failures():
-    source = APP_PATH.read_text(encoding="utf-8")
+def _read_ui_sources() -> str:
+    """오류 처리 계약을 확인할 Streamlit UI 소스를 합쳐 반환한다."""
+
+    paths = (
+        APP_PATH,
+        UI_INQUIRY_PATH,
+    )
+
+    missing = [
+        str(path)
+        for path in paths
+        if not path.exists()
+    ]
+
+    assert not missing, (
+        "검사할 UI 파일이 없습니다: "
+        + ", ".join(missing)
+    )
+
+    return "\n".join(
+        path.read_text(
+            encoding="utf-8"
+        )
+        for path in paths
+    )
+
+
+def test_ui_does_not_render_raw_exception_text_for_service_failures():
+    source = _read_ui_sources()
 
     forbidden = [
         "st.error(\n            str(exc)",
@@ -17,14 +59,15 @@ def test_app_does_not_render_raw_exception_text_for_service_failures():
         'f"입력값 비교 그래프를 표시하지 못했습니다: {exc}"',
         'f"Adult 데이터를 불러오지 못했습니다: "',
         "st.code(message)",
+        "st.exception(",
     ]
 
     for pattern in forbidden:
         assert pattern not in source
 
 
-def test_app_logs_server_side_failures():
-    source = APP_PATH.read_text(encoding="utf-8")
+def test_ui_logs_server_side_failures():
+    source = _read_ui_sources()
 
     expected_log_messages = [
         "예측 입력 스키마 로드 실패",

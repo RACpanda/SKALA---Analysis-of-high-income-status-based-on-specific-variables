@@ -24,6 +24,7 @@ from src.modeling import (
 )
 from src.ui_common import (
     category_value_label,
+    display_plotly_chart,
     variable_label,
 )
 from src.visualization import (
@@ -617,9 +618,8 @@ def prediction_page() -> None:
                 )
             )
 
-            st.plotly_chart(
-                explanation_figure,
-                width="stretch",
+            display_plotly_chart(
+                explanation_figure
             )
 
         except VisualizationError:
@@ -671,9 +671,8 @@ def prediction_page() -> None:
             )
         )
 
-        st.plotly_chart(
-            importance_figure,
-            width="stretch",
+        display_plotly_chart(
+            importance_figure
         )
 
     except (
@@ -818,9 +817,8 @@ def prediction_page() -> None:
         and what_if_result_feature
         == what_if_feature
     ):
-        st.plotly_chart(
-            what_if_figure,
-            width="stretch",
+        display_plotly_chart(
+            what_if_figure
         )
 
         st.caption(

@@ -105,3 +105,25 @@ def display_interpretation_note(
         ),
         unsafe_allow_html=True,
     )
+
+# ============================================================
+# Plotly 표시 설정
+# ============================================================
+
+PLOTLY_STATIC_CONFIG = {
+    "staticPlot": True,
+    "displayModeBar": False,
+    "responsive": True,
+}
+
+
+def display_plotly_chart(
+    figure,
+) -> None:
+    """Plotly Figure를 사용자 조작이 없는 정적 그래프로 표시한다."""
+
+    st.plotly_chart(
+        figure,
+        width="stretch",
+        config=PLOTLY_STATIC_CONFIG,
+    )

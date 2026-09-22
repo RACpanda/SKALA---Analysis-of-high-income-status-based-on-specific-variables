@@ -27,6 +27,7 @@ from src.labels import (
 from src.ui_common import (
     category_value_label,
     display_interpretation_note,
+    display_plotly_chart,
     format_p_value,
     format_percent,
     result_value_label,
@@ -1524,11 +1525,10 @@ def association_page(
         "adjusted_probability"
         in figures
     ):
-        st.plotly_chart(
+        display_plotly_chart(
             figures[
                 "adjusted_probability"
-            ],
-            width="stretch",
+            ]
         )
 
     # --------------------------------------------------------
@@ -1564,11 +1564,10 @@ def association_page(
             "psm_balance"
             in figures
         ):
-            st.plotly_chart(
+            display_plotly_chart(
                 figures[
                     "psm_balance"
-                ],
-                width="stretch",
+                ]
             )
 
         display_interpretation_note(

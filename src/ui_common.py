@@ -110,8 +110,8 @@ def display_interpretation_note(
 # Plotly 표시 설정
 # ============================================================
 
-PLOTLY_STATIC_CONFIG = {
-    "staticPlot": True,
+PLOTLY_DISPLAY_CONFIG = {
+    "scrollZoom": False,
     "displayModeBar": False,
     "responsive": True,
 }
@@ -120,10 +120,18 @@ PLOTLY_STATIC_CONFIG = {
 def display_plotly_chart(
     figure,
 ) -> None:
-    """Plotly Figure를 사용자 조작이 없는 정적 그래프로 표시한다."""
+    """확대·축소는 막고 Hover 정보는 유지하여 Plotly Figure를 표시한다."""
+
+    figure.update_xaxes(
+        fixedrange=True
+    )
+
+    figure.update_yaxes(
+        fixedrange=True
+    )
 
     st.plotly_chart(
         figure,
         width="stretch",
-        config=PLOTLY_STATIC_CONFIG,
+        config=PLOTLY_DISPLAY_CONFIG,
     )

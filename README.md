@@ -1,5 +1,7 @@
 # Adult Income Explorer
 
+https://skala---analysis-of-high-income-status-based-on-specific-varia.streamlit.app/
+
 SKALA 교육 과정에서 진행한 **Adult Census Income 기반 데이터 분석 및 머신러닝 프로젝트**입니다.
 
 사용자가 직접 변수를 선택해 **연 소득 50,000달러 초과 여부와의 관계를 탐색**하고, 개인의 조건을 입력해 **연 소득 50,000달러 초과 확률을 예측**할 수 있는 Streamlit 웹 애플리케이션입니다.
